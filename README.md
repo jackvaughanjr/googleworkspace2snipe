@@ -39,7 +39,15 @@ interaction required. Runs fully headless; suitable for cron or similar schedule
      the JSON key)
    - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
 
-4. **Choose an admin email**: any Google Workspace super admin address in your domain.
+4. **Grant the Directory API scope** (only if you use OU filtering or enriched seat
+   notes): return to the same DWD entry created in step 3 and add a second scope,
+   separated from the first by a comma:
+   - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
+
+   If you do not use `ou_paths` or `enrich_notes_for_skus`, this scope is never
+   requested and does not need to be granted.
+
+5. **Choose an admin email**: any Google Workspace super admin address in your domain.
    This is the account the service account will impersonate.
 
 ---
@@ -139,8 +147,8 @@ With an OU filter active, only users in those OUs are checked out or checked in.
 Seats belonging to users outside the filter are left untouched. Leave `ou_paths`
 empty (or omit it) to sync all active users in the domain.
 
-Requires the `admin.directory.user.readonly` DWD scope to be added alongside
-`apps.licensing` in the Admin Console (see CONTEXT.md).
+Requires the `admin.directory.user.readonly` DWD scope — see step 4 of the
+Google Cloud setup section above.
 
 ### Enriched seat notes
 
@@ -296,18 +304,18 @@ All notifications are suppressed in `--dry-run` mode.
 
 ## Roadmap
 
-<!-- TODO: add a --create-users flag (and sync.create_users setting) that automatically
-creates a Snipe-IT user account for any Google Workspace license holder who does not
-already exist in Snipe-IT, instead of warning and skipping them. The created user
-should be populated from the license assignment data available at sync time (email,
-name if accessible). Without this flag the current behaviour (warn + skip + notify
-via Slack) is preserved. -->
+- **`--create-users` flag** — Automatically create a Snipe-IT user account for
+  any Google Workspace license holder who does not already exist in Snipe-IT,
+  instead of warning and skipping them. The created user would be populated from
+  the license assignment data available at sync time (email, display name).
+  Without this flag the current behaviour (warn + skip + Slack notification) is
+  preserved.
 
-<!-- TODO: add a `discover` command that connects to the configured Google Workspace,
-enumerates all product IDs with at least one active license assignment, and
-writes the discovered product_ids list back into settings.yaml automatically.
-This removes the need to manually research and maintain product IDs for add-ons
-and newer Google Workspace products that fall outside the built-in default list. -->
+- **`discover` command** — Connect to the configured Google Workspace, enumerate
+  all product IDs with at least one active license assignment, and write the
+  discovered `product_ids` list back into `settings.yaml` automatically. This
+  removes the need to manually research and maintain product IDs for add-ons and
+  newer Google Workspace products that fall outside the built-in default list.
 
 ---
 

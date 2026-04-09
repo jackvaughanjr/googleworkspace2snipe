@@ -65,6 +65,9 @@ comma-separated list in the Admin Console.
      - **Client ID**: the service account's numeric client ID (the `client_id`
        field in the JSON key file, or shown as "Unique ID" in the Cloud Console).
      - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
+   - If you plan to use `ou_paths` or `enrich_notes_for_skus`, edit the same
+     DWD entry and add the Directory API scope as a second comma-separated value:
+     `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
 
 5. **Choose an admin email** (`google_workspace.admin_email`): any super admin
    address in the domain. The service account impersonates this account. The

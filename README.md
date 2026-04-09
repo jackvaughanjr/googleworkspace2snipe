@@ -28,27 +28,34 @@ interaction required. Runs fully headless; suitable for cron or similar schedule
 1. **Enable the Enterprise License Manager API** (APIs & Services → Library →
    "Enterprise License Manager API").
 
-2. **Create a service account** (IAM & Admin → Service Accounts → Create). No Cloud
+2. **Enable the Admin SDK API** (only if you use OU filtering or enriched seat
+   notes): in the same Library, search for "Admin SDK API" and enable it. If you
+   do not use `ou_paths` or `enrich_notes_for_skus`, skip this step.
+
+3. **Create a service account** (IAM & Admin → Service Accounts → Create). No Cloud
    IAM roles are required. After creating it, go to Keys → Add Key → Create New Key
    → JSON and download the key file.
 
-3. **Grant domain-wide delegation** in the [Google Admin Console](https://admin.google.com):
+4. **Grant domain-wide delegation** in the [Google Admin Console](https://admin.google.com):
    - Security → Access and data control → API controls → Manage Domain Wide Delegation
      → Add new
    - **Client ID**: the service account's numeric Client ID (the `client_id` field in
      the JSON key)
    - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
 
-4. **Grant the Directory API scope** (only if you use OU filtering or enriched seat
-   notes): return to the same DWD entry created in step 3 and add a second scope,
+5. **Grant the Directory API scope** (only if you use OU filtering or enriched seat
+   notes): return to the same DWD entry created in step 4 and add a second scope,
    separated from the first by a comma:
    - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
 
    If you do not use `ou_paths` or `enrich_notes_for_skus`, this scope is never
    requested and does not need to be granted.
 
-5. **Choose an admin email**: any Google Workspace super admin address in your domain.
+6. **Choose an admin email**: any Google Workspace super admin address in your domain.
    This is the account the service account will impersonate.
+
+> **Note:** API enablements can take a few minutes to propagate. If you get an
+> "API not enabled" error immediately after enabling, wait 2–3 minutes and retry.
 
 ---
 

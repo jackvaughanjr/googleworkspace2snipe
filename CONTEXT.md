@@ -51,13 +51,17 @@ comma-separated list in the Admin Console.
    - Go to APIs & Services → Library in the Cloud Console.
    - Search for "Enterprise License Manager API" and enable it.
 
-3. **Create a service account**:
+3. **Enable the Admin SDK API** (only if using `ou_paths` or `enrich_notes_for_skus`):
+   - In the same Library, search for "Admin SDK API" and enable it.
+   - API enablements can take a few minutes to propagate.
+
+4. **Create a service account**:
    - Go to IAM & Admin → Service Accounts → Create Service Account.
    - Name it (e.g. `snipe-sync`). No Cloud IAM roles are required.
    - After creating it, go to Keys → Add Key → Create New Key → JSON.
    - Download the JSON file. **This is your `credentials_file`.**
 
-4. **Grant domain-wide delegation** in the Google Admin Console
+5. **Grant domain-wide delegation** in the Google Admin Console
    (admin.google.com, not Cloud Console):
    - Go to Security → Access and data control → API controls →
      Manage Domain Wide Delegation → Add new.
@@ -69,7 +73,7 @@ comma-separated list in the Admin Console.
      DWD entry and add the Directory API scope as a second comma-separated value:
      `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
 
-5. **Choose an admin email** (`google_workspace.admin_email`): any super admin
+6. **Choose an admin email** (`google_workspace.admin_email`): any super admin
    address in the domain. The service account impersonates this account. The
    account must be a super admin, not just a delegated admin.
 

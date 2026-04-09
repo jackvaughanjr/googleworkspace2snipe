@@ -91,6 +91,22 @@ Google Admin Console but not in `test` output, add its product ID to
 `google_workspace.product_ids`. You can find product IDs via the Google Admin
 SDK API Explorer or by inspecting network traffic in the Admin Console.
 
+<!-- TODO: implement a --create-users flag (and sync.create_users setting) that
+automatically creates a Snipe-IT user for any Google Workspace license holder
+not found in Snipe-IT, rather than warning and skipping them. Without the flag,
+current behaviour (warn + skip + Slack notification) is preserved.
+Implementation notes:
+- Requires the Directory API scope (admin.directory.user.readonly) in addition
+  to apps.licensing, so user display name and department can be populated on
+  the new Snipe-IT account.
+- Snipe-IT user creation uses POST /api/v1/users with at minimum: first_name,
+  last_name, username (email), email, password (random or forced-reset).
+- Add CreateUser to internal/snipeit/client.go; add the scope to the JWT
+  and update CONTEXT.md DWD setup instructions accordingly.
+- The Directory API client method (e.g. GetUser(ctx, email)) can reuse the
+  existing JWT auth infrastructure — just add the second scope space-separated
+  in the buildJWT scope claim and add the Directory API base URL constant. -->
+
 <!-- TODO: implement a `discover` command that connects to the configured Google
 Workspace, enumerates all product IDs that have at least one active license
 assignment (by iterating the known master product list from Google's docs, or

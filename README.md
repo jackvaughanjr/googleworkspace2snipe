@@ -244,6 +244,13 @@ All notifications are suppressed in `--dry-run` mode.
 
 ## Roadmap
 
+<!-- TODO: add a --create-users flag (and sync.create_users setting) that automatically
+creates a Snipe-IT user account for any Google Workspace license holder who does not
+already exist in Snipe-IT, instead of warning and skipping them. The created user
+should be populated from the license assignment data available at sync time (email,
+name if accessible). Without this flag the current behaviour (warn + skip + notify
+via Slack) is preserved. -->
+
 <!-- TODO: add a `discover` command that connects to the configured Google Workspace,
 enumerates all product IDs with at least one active license assignment, and
 writes the discovered product_ids list back into settings.yaml automatically.

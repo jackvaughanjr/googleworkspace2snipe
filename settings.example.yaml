@@ -23,11 +23,11 @@ google_workspace:
 
   # Optional: restrict sync to specific Organizational Units (and their subtrees).
   # Users outside these OUs are ignored for both checkout and checkin — their
-  # seats in Snipe-IT are left untouched. Leave empty to sync all active users.
-  # Each path must start with "/" (e.g. "/Engineering"). The root OU is "/".
-  # Requires the admin.directory.user.readonly DWD scope (see CONTEXT.md).
-  ou_paths: []
-  # ou_paths:
+  # seats in Snipe-IT are left untouched. Leave empty (no items) to sync all
+  # active users. Each path must start with "/" (e.g. "/Engineering").
+  # Requires the admin.directory.user.readonly DWD scope (see Google Cloud setup).
+  # To disable, remove all "- ..." lines and leave the key with no items listed.
+  ou_paths:
   #   - "/Engineering"
   #   - "/Sales"
 
@@ -35,21 +35,23 @@ google_workspace:
   # per-user OU path and admin status in addition to the standard product/SKU
   # identifiers. Matching is case-insensitive against either the SKU name or
   # SKU ID. Use the SKU name as it appears in `googleworkspace2snipe test` output.
-  # Requires the admin.directory.user.readonly DWD scope (see CONTEXT.md).
+  # Requires the admin.directory.user.readonly DWD scope (see Google Cloud setup).
   # Example: the primary license every user holds is a good candidate, since
   # its notes then reflect each user's current department and admin status.
-  enrich_notes_for_skus: []
-  # enrich_notes_for_skus:
+  # To disable, remove all "- ..." lines and leave the key with no items listed.
+  enrich_notes_for_skus:
   #   - "Google Workspace Business Plus"   # match by SKU name
   #   - "1010020020"                        # or by SKU ID
 
   # Google Workspace product IDs to query for license assignments.
   # Each product may contain multiple SKUs (e.g. Business Starter, Business Plus).
-  # Leave empty to use the built-in defaults (covers the most common products).
-  # Only products with at least one active assignment produce a Snipe-IT license.
+  # Leave empty (no items listed) to use the built-in defaults, which cover the
+  # most common products. Only add items here if you have add-ons or products
+  # outside the default list. Only products with at least one active assignment
+  # produce a Snipe-IT license.
   # Full list of product IDs: https://developers.google.com/admin-sdk/licensing/v1/how-tos/products
-  product_ids: []
-  # product_ids:
+  # To disable (use defaults), remove all "- ..." lines and leave the key with no items listed.
+  product_ids:
   #   - "Google-Apps"           # Google Workspace Business / Enterprise / Education
   #   - "Google-Vault"          # Google Vault
   #   - "Google-Drive-storage"  # Google additional storage

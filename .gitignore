@@ -9,6 +9,7 @@ go.work
 go.work.sum
 .env
 settings.yaml
+*.json
 .cache/
 googleworkspace2snipe
 .DS_Store

@@ -21,6 +21,28 @@ google_workspace:
   # Your Google Workspace primary domain (e.g. "example.com").
   domain: "your-domain.example.com"
 
+  # Optional: restrict sync to specific Organizational Units (and their subtrees).
+  # Users outside these OUs are ignored for both checkout and checkin — their
+  # seats in Snipe-IT are left untouched. Leave empty to sync all active users.
+  # Each path must start with "/" (e.g. "/Engineering"). The root OU is "/".
+  # Requires the admin.directory.user.readonly DWD scope (see CONTEXT.md).
+  ou_paths: []
+  # ou_paths:
+  #   - "/Engineering"
+  #   - "/Sales"
+
+  # Optional: SKU names or IDs whose Snipe-IT seat notes should include
+  # per-user OU path and admin status in addition to the standard product/SKU
+  # identifiers. Matching is case-insensitive against either the SKU name or
+  # SKU ID. Use the SKU name as it appears in `googleworkspace2snipe test` output.
+  # Requires the admin.directory.user.readonly DWD scope (see CONTEXT.md).
+  # Example: the primary license every user holds is a good candidate, since
+  # its notes then reflect each user's current department and admin status.
+  enrich_notes_for_skus: []
+  # enrich_notes_for_skus:
+  #   - "Google Workspace Business Plus"   # match by SKU name
+  #   - "1010020020"                        # or by SKU ID
+
   # Google Workspace product IDs to query for license assignments.
   # Each product may contain multiple SKUs (e.g. Business Starter, Business Plus).
   # Leave empty to use the built-in defaults (covers the most common products).

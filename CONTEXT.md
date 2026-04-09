@@ -23,11 +23,25 @@ The integration reads a Google service account JSON key file and impersonates a
 Google Workspace super admin via domain-wide delegation. No user interaction is
 required — it runs fully headless.
 
-### Required OAuth 2.0 scope
+### Required OAuth 2.0 scopes
+
+The base scope is always required:
 
 ```
 https://www.googleapis.com/auth/apps.licensing
 ```
+
+The Directory API scope is additionally required when either
+`google_workspace.ou_paths` or `google_workspace.enrich_notes_for_skus` is
+configured. If neither feature is used, this scope is not requested and does
+not need to be granted in DWD.
+
+```
+https://www.googleapis.com/auth/admin.directory.user.readonly
+```
+
+Both scopes can coexist on the same DWD entry — enter them as a
+comma-separated list in the Admin Console.
 
 ### Setup steps
 
@@ -132,6 +146,8 @@ google_workspace:
   product_ids: []                  # optional; empty = DefaultProductIDs
   license_name_prefix: ""          # e.g. "Acme - "
   license_name_suffix: ""          # e.g. " (acme.com)"
+  ou_paths: []                     # optional; restricts checkout+checkin scope
+  enrich_notes_for_skus: []        # optional; SKU names or IDs for rich notes
 
 snipe_it:
   url: "https://snipe.your-domain.example.com"
@@ -159,7 +175,8 @@ slack:
 | `SNIPE_TOKEN`             | `snipe_it.api_key`                    |
 | `SLACK_WEBHOOK`           | `slack.webhook_url`                   |
 
-`product_ids`, `license_name_prefix`, and `license_name_suffix` cannot be
+List-type config keys (`product_ids`, `ou_paths`, `enrich_notes_for_skus`) and
+string formatting keys (`license_name_prefix`, `license_name_suffix`) cannot be
 overridden via env vars; set them in `settings.yaml`.
 
 ---
@@ -185,19 +202,79 @@ Prefix and suffix are concatenated verbatim — include any separator characters
 
 ---
 
+## OU filtering
+
+Set `google_workspace.ou_paths` to restrict the sync to users in specific
+Organizational Units and their subtrees:
+
+```yaml
+google_workspace:
+  ou_paths:
+    - "/Engineering"
+    - "/Sales"
+```
+
+Behaviour with OU filter active:
+- **Checkout pass**: only users within the specified OUs are checked out to Snipe-IT licenses.
+- **Checkin pass**: only seats belonging to users within the OU scope are checked in when
+  those users lose a license. Seats for users outside the OU scope are left untouched,
+  even if they are checked out in Snipe-IT.
+- **Seat counts**: license seat expansion uses the count of in-scope users, not the
+  global user count.
+- **`test` output**: an "In Scope" column shows the per-SKU user count after OU filtering,
+  alongside the global user count.
+
+Requires the `admin.directory.user.readonly` DWD scope. The Directory API is called once
+per sync run; results are cached for the duration of the run.
+
+---
+
+## Note enrichment
+
+Set `google_workspace.enrich_notes_for_skus` to include per-user OU path and admin
+status in the Snipe-IT seat notes for specific licenses:
+
+```yaml
+google_workspace:
+  enrich_notes_for_skus:
+    - "Google Workspace Business Plus"   # match by SKU name (case-insensitive)
+    - "1010020020"                        # or match by SKU ID
+```
+
+The primary Workspace license that all users hold is a natural candidate, since its
+notes then reflect each user's current department and admin status and update
+automatically when users move OUs or gain/lose admin privileges.
+
+Requires the `admin.directory.user.readonly` DWD scope (same as OU filtering — if
+both are configured, only one Directory API call is made).
+
+---
+
 ## Seat notes format
 
-The `notes` field written to each Snipe-IT seat contains stable identifiers
-useful for debugging:
+**Standard notes** (all SKUs unless configured for enrichment):
 
 ```
 product_id: Google-Apps
 sku_id: 1010020025
 ```
 
-These values never change for a given license, so notes are written once on
-checkout and not updated on subsequent syncs (seats show as `skipped`). Use
-`--force` to rewrite notes on all existing seats.
+These values are stable identifiers that never change for a given license. Notes are
+written once on checkout and not updated on subsequent syncs (seats show as `skipped`).
+
+**Enriched notes** (SKUs listed in `enrich_notes_for_skus`):
+
+```
+product_id: Google-Apps
+sku_id: 1010020025
+org_unit: /Engineering
+is_admin: false
+```
+
+`org_unit` and `is_admin` reflect the user's current state at sync time. When a user
+moves OUs or their admin status changes, the notes are updated on the next sync (the
+`notes_updated` counter increments). Use `--force` to rewrite all enriched notes
+immediately regardless of current state.
 
 ---
 

@@ -54,7 +54,11 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("snipe_it.license_category_id is required in settings.yaml")
 	}
 
-	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain)
+	ouPaths := viper.GetStringSlice("google_workspace.ou_paths")
+	enrichSkus := viper.GetStringSlice("google_workspace.enrich_notes_for_skus")
+	needsDirectory := len(ouPaths) > 0 || len(enrichSkus) > 0
+
+	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain, needsDirectory)
 	if err != nil {
 		return fmt.Errorf("creating Google Workspace client: %w", err)
 	}
@@ -65,7 +69,10 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	emailFilter, _ := cmd.Flags().GetString("email")
 
-	productIDs := viper.GetStringSlice("google_workspace.product_ids")
+	licenseName := viper.GetString("snipe_it.license_name")
+	if licenseName == "" {
+		licenseName = "Google Workspace"
+	}
 
 	cfg := sync.Config{
 		DryRun:            viper.GetBool("sync.dry_run"),
@@ -73,9 +80,11 @@ func runSync(cmd *cobra.Command, args []string) error {
 		LicenseCategoryID: categoryID,
 		ManufacturerID:    viper.GetInt("snipe_it.license_manufacturer_id"),
 		SupplierID:        viper.GetInt("snipe_it.license_supplier_id"),
-		ProductIDs:        productIDs,
+		ProductIDs:        viper.GetStringSlice("google_workspace.product_ids"),
 		LicenseNamePrefix: viper.GetString("google_workspace.license_name_prefix"),
 		LicenseNameSuffix: viper.GetString("google_workspace.license_name_suffix"),
+		OUPaths:           ouPaths,
+		EnrichNotesSKUs:   enrichSkus,
 	}
 
 	if cfg.DryRun {

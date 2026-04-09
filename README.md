@@ -124,6 +124,58 @@ Google Voice Standard (acme.com)
 The prefix and suffix are concatenated verbatim — include any desired separators
 (spaces, dashes, parentheses) in the values themselves.
 
+### OU filtering
+
+To restrict the sync to users in specific Organizational Units (and their subtrees):
+
+```yaml
+google_workspace:
+  ou_paths:
+    - "/Engineering"
+    - "/Sales"
+```
+
+With an OU filter active, only users in those OUs are checked out or checked in.
+Seats belonging to users outside the filter are left untouched. Leave `ou_paths`
+empty (or omit it) to sync all active users in the domain.
+
+Requires the `admin.directory.user.readonly` DWD scope to be added alongside
+`apps.licensing` in the Admin Console (see CONTEXT.md).
+
+### Enriched seat notes
+
+By default, each Snipe-IT seat's notes contain only stable product identifiers:
+
+```
+product_id: Google-Apps
+sku_id: 1010020025
+```
+
+To also include per-user OU path and admin status for specific licenses, add
+the SKU name or SKU ID to `enrich_notes_for_skus`:
+
+```yaml
+google_workspace:
+  enrich_notes_for_skus:
+    - "Google Workspace Business Plus"   # the license every user holds
+```
+
+Enriched notes look like:
+
+```
+product_id: Google-Apps
+sku_id: 1010020025
+org_unit: /Engineering
+is_admin: false
+```
+
+`org_unit` and `is_admin` are updated automatically on subsequent syncs when a
+user moves OUs or gains/loses admin privileges. Use `--force` to rewrite all
+enriched notes immediately.
+
+Also requires `admin.directory.user.readonly` — if both OU filtering and note
+enrichment are configured, only one Directory API call is made per sync run.
+
 ### Product IDs
 
 By default, the following product families are queried:

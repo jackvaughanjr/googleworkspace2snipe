@@ -23,11 +23,19 @@ type Config struct {
 	// Defaults to googleworkspace.DefaultProductIDs when empty.
 	ProductIDs []string
 	// LicenseNamePrefix is prepended verbatim to each SKU name in Snipe-IT.
-	// Example: "Acme - " produces "Acme - Google Workspace Business Plus".
 	LicenseNamePrefix string
 	// LicenseNameSuffix is appended verbatim to each SKU name in Snipe-IT.
-	// Example: " (acme.com)" produces "Google Workspace Business Plus (acme.com)".
 	LicenseNameSuffix string
+	// OUPaths restricts the sync to users in these Organizational Units (and
+	// their subtrees). Users outside the specified OUs are ignored for both
+	// checkout and checkin. Empty = all users in the domain.
+	OUPaths []string
+	// EnrichNotesSKUs is a list of SKU names or SKU IDs whose Snipe-IT seat
+	// notes should include per-user OU path and admin status in addition to
+	// the standard product/SKU identifiers. Matching is case-insensitive against
+	// either the SKU name (e.g. "Google Workspace Business Plus") or the SKU ID
+	// (e.g. "1010020025").
+	EnrichNotesSKUs []string
 }
 
 // Syncer orchestrates the Google Workspace → Snipe-IT per-SKU license sync.
@@ -42,9 +50,9 @@ func NewSyncer(gws *googleworkspace.Client, snipe *snipeit.Client, cfg Config) *
 }
 
 // Run executes the full sync across all SKUs found in the configured product IDs.
-// Each SKU with at least one active assignment is synced as a separate Snipe-IT license.
+// Each SKU with at least one active assignment becomes a separate Snipe-IT license.
 //
-// emailFilter restricts the checkout pass to one user across all SKUs they appear in,
+// emailFilter restricts the checkout pass to one user across all their SKUs
 // and suppresses the checkin pass.
 func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 	var result Result
@@ -65,6 +73,33 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 		slog.Info("resolved manufacturer", "name", "Google", "id", manufacturerID)
 	}
 
+	// Fetch the Directory API user map when OU filtering or note enrichment is
+	// configured. The map is keyed by lowercased email and provides OrgUnitPath
+	// and IsAdmin for each active user in scope.
+	needsDirectory := len(s.config.OUPaths) > 0 || len(s.config.EnrichNotesSKUs) > 0
+	var userMap map[string]googleworkspace.User
+	if needsDirectory {
+		slog.Info("fetching Directory API user map",
+			"ou_filter", s.config.OUPaths,
+			"enrich_skus", s.config.EnrichNotesSKUs)
+		var err error
+		userMap, err = s.gws.GetUserMap(ctx, s.config.OUPaths)
+		if err != nil {
+			return result, fmt.Errorf("fetching user directory: %w", err)
+		}
+		slog.Info("user map loaded", "users", len(userMap))
+	}
+
+	// Build the allowed-email set for OU filtering (nil = no filter).
+	var allowedEmails map[string]struct{}
+	if len(s.config.OUPaths) > 0 {
+		allowedEmails = make(map[string]struct{}, len(userMap))
+		for email := range userMap {
+			allowedEmails[email] = struct{}{}
+		}
+		slog.Info("OU filter active", "allowed_users", len(allowedEmails))
+	}
+
 	slog.Info("fetching Google Workspace license assignments", "products", productIDs)
 	skuGroups, err := s.gws.ListLicenseAssignmentsBySku(ctx, productIDs)
 	if err != nil {
@@ -75,7 +110,7 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 	seenUnmatched := make(map[string]struct{})
 
 	for _, sku := range skuGroups {
-		skuResult, err := s.syncSku(ctx, sku, emailFilter, manufacturerID)
+		skuResult, err := s.syncSku(ctx, sku, emailFilter, manufacturerID, allowedEmails, userMap)
 		if err != nil {
 			slog.Warn("error syncing SKU", "sku", sku.SkuName, "error", err)
 			result.Warnings++
@@ -86,8 +121,7 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 		result.CheckedIn += skuResult.CheckedIn
 		result.Skipped += skuResult.Skipped
 		result.Warnings += skuResult.Warnings
-		// Deduplicate unmatched emails across SKUs — a user missing from Snipe-IT
-		// should only trigger one notification, not one per SKU they hold.
+		// Deduplicate unmatched emails across SKUs.
 		for _, email := range skuResult.UnmatchedEmails {
 			if _, seen := seenUnmatched[email]; !seen {
 				seenUnmatched[email] = struct{}{}
@@ -100,45 +134,72 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 }
 
 // syncSku syncs a single Google Workspace SKU to one Snipe-IT license.
-func (s *Syncer) syncSku(ctx context.Context, sku googleworkspace.SkuGroup, emailFilter string, manufacturerID int) (Result, error) {
+//
+// allowedEmails: set of emails within the OU filter scope (nil = no filter).
+// userMap: Directory API user details, used for OU/admin note enrichment (nil = no enrichment).
+func (s *Syncer) syncSku(
+	ctx context.Context,
+	sku googleworkspace.SkuGroup,
+	emailFilter string,
+	manufacturerID int,
+	allowedEmails map[string]struct{},
+	userMap map[string]googleworkspace.User,
+) (Result, error) {
 	var result Result
 	licenseName := BuildLicenseName(s.config, sku.SkuName)
+	enriched := IsEnrichedSKU(s.config, sku)
 
-	// Full active email set for this SKU — used in the checkin pass regardless
-	// of the --email filter.
-	activeEmails := make(map[string]struct{}, len(sku.UserEmails))
-	for _, email := range sku.UserEmails {
-		activeEmails[strings.ToLower(email)] = struct{}{}
+	// Apply OU filter: restrict to users within the allowed set.
+	managedEmails := sku.UserEmails
+	if allowedEmails != nil {
+		var filtered []string
+		for _, email := range managedEmails {
+			if _, ok := allowedEmails[email]; ok {
+				filtered = append(filtered, email)
+			}
+		}
+		managedEmails = filtered
+	}
+
+	if len(managedEmails) == 0 && allowedEmails != nil {
+		// No users in this SKU fall within the OU filter; skip entirely.
+		slog.Debug("SKU has no users in OU scope, skipping", "sku", sku.SkuName)
+		return result, nil
+	}
+
+	// activeEmails drives the checkin pass: users we manage who currently hold
+	// this SKU. Users outside allowedEmails (if set) are never touched.
+	activeEmails := make(map[string]struct{}, len(managedEmails))
+	for _, email := range managedEmails {
+		activeEmails[email] = struct{}{}
 	}
 
 	// Apply --email filter to the checkout list.
-	checkoutEmails := sku.UserEmails
+	checkoutEmails := managedEmails
 	if emailFilter != "" {
 		needle := strings.ToLower(emailFilter)
 		var filtered []string
 		for _, email := range checkoutEmails {
-			if strings.ToLower(email) == needle {
+			if email == needle {
 				filtered = append(filtered, email)
 				break
 			}
 		}
 		if len(filtered) == 0 {
-			// User doesn't hold this SKU; skip entirely.
-			return result, nil
+			return result, nil // user not in this SKU (or not in OU scope)
 		}
 		checkoutEmails = filtered
 	}
 
-	slog.Info("syncing SKU", "sku", sku.SkuName, "license", licenseName, "users", len(sku.UserEmails))
+	slog.Info("syncing SKU", "sku", sku.SkuName, "license", licenseName,
+		"managed_users", len(managedEmails), "enriched_notes", enriched)
 
-	notes := buildNotes(sku)
-
-	// Find or create the Snipe-IT license for this SKU.
+	// Find or create the Snipe-IT license.
+	activeCount := len(managedEmails)
 	var (
 		lic *snipeit.License
 		err error
 	)
-	activeCount := len(sku.UserEmails)
 	if s.config.DryRun {
 		lic, err = s.snipe.FindLicenseByName(ctx, licenseName)
 		if err != nil {
@@ -195,6 +256,8 @@ func (s *Syncer) syncSku(ctx context.Context, sku googleworkspace.SkuGroup, emai
 
 	// Checkout / update loop.
 	for _, email := range checkoutEmails {
+		notes := buildNotes(sku, enriched, email, userMap)
+
 		snipeUser, err := s.snipe.FindUserByEmail(ctx, email)
 		if err != nil {
 			slog.Warn("error looking up Snipe-IT user", "email", email, "error", err)
@@ -244,7 +307,7 @@ func (s *Syncer) syncSku(ctx context.Context, sku googleworkspace.SkuGroup, emai
 		slog.Info("checking out seat", "email", email, "license", licenseName, "seat_id", seat.ID)
 		if err := s.snipe.CheckoutSeat(ctx, lic.ID, seat.ID, snipeUser.ID, notes); err != nil {
 			slog.Warn("failed to checkout seat", "email", email, "license", licenseName, "error", err)
-			freeSeats = append(freeSeats, seat) // return on failure
+			freeSeats = append(freeSeats, seat)
 			result.Warnings++
 			continue
 		}
@@ -255,7 +318,13 @@ func (s *Syncer) syncSku(ctx context.Context, sku googleworkspace.SkuGroup, emai
 	if emailFilter == "" {
 		for email, seat := range checkedOutByEmail {
 			if _, active := activeEmails[email]; active {
-				continue
+				continue // still holds the SKU
+			}
+			// If OU filter is active, only touch seats for users within scope.
+			if allowedEmails != nil {
+				if _, inScope := allowedEmails[email]; !inScope {
+					continue
+				}
 			}
 			slog.Info("checking in seat for inactive user", "email", email,
 				"license", licenseName, "seat_id", seat.ID, "dry_run", s.config.DryRun)
@@ -275,14 +344,37 @@ func (s *Syncer) syncSku(ctx context.Context, sku googleworkspace.SkuGroup, emai
 }
 
 // BuildLicenseName applies the configured prefix and suffix to a SKU name.
-// The prefix and suffix are concatenated verbatim — include any desired
-// separators or punctuation in the prefix/suffix values themselves.
 func BuildLicenseName(cfg Config, skuName string) string {
 	return cfg.LicenseNamePrefix + skuName + cfg.LicenseNameSuffix
 }
 
-// buildNotes returns the notes string written to each Snipe-IT seat.
-// The product and SKU IDs are stable identifiers useful for debugging.
-func buildNotes(sku googleworkspace.SkuGroup) string {
-	return "product_id: " + sku.ProductID + "\nsku_id: " + sku.SkuID
+// IsEnrichedSKU reports whether this SKU should include per-user OU and admin
+// details in its Snipe-IT seat notes. Matches against either SKU name or SKU ID,
+// case-insensitively.
+func IsEnrichedSKU(cfg Config, sku googleworkspace.SkuGroup) bool {
+	for _, s := range cfg.EnrichNotesSKUs {
+		if strings.EqualFold(s, sku.SkuName) || strings.EqualFold(s, sku.SkuID) {
+			return true
+		}
+	}
+	return false
+}
+
+// buildNotes returns the notes string written to the Snipe-IT seat.
+// For enriched SKUs, per-user OU path and admin status are appended using data
+// from the Directory API user map (if available for that user).
+func buildNotes(sku googleworkspace.SkuGroup, enriched bool, email string, userMap map[string]googleworkspace.User) string {
+	base := "product_id: " + sku.ProductID + "\nsku_id: " + sku.SkuID
+	if !enriched || userMap == nil {
+		return base
+	}
+	u, ok := userMap[email]
+	if !ok {
+		return base
+	}
+	adminStr := "false"
+	if u.IsAdmin {
+		adminStr = "true"
+	}
+	return base + "\norg_unit: " + u.OrgUnitPath + "\nis_admin: " + adminStr
 }

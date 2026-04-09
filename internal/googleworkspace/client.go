@@ -15,17 +15,32 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
 const (
-	tokenEndpoint = "https://oauth2.googleapis.com/token"
-	directoryScope = "https://www.googleapis.com/auth/admin.directory.user.readonly"
-	apiBase        = "https://admin.googleapis.com/admin/directory/v1"
+	tokenEndpoint  = "https://oauth2.googleapis.com/token"
+	licensingScope = "https://www.googleapis.com/auth/apps.licensing"
+	licensingBase  = "https://licensing.googleapis.com/apps/licensing/v1"
 	jwtGrantType   = "urn:ietf:params:oauth:grant-type:jwt-bearer"
+
+	// DefaultProductIDs covers the standard Google Workspace product families.
+	// Add product IDs to google_workspace.product_ids in settings.yaml to extend.
 )
+
+// DefaultProductIDs is the list of Google Workspace product IDs queried when
+// google_workspace.product_ids is not set in settings.yaml. Each product may
+// contain multiple SKUs (e.g. Business Starter, Business Plus, Enterprise).
+var DefaultProductIDs = []string{
+	"Google-Apps",         // Google Workspace Business / Enterprise / Education
+	"Google-Vault",        // Google Vault
+	"Google-Drive-storage", // Google additional storage
+	"Cloud-Identity",      // Cloud Identity Free / Premium
+	"Google-Voice",        // Google Voice Starter / Standard / Premier
+}
 
 // serviceAccountKey mirrors the JSON key file downloaded from Google Cloud Console.
 type serviceAccountKey struct {
@@ -41,35 +56,39 @@ type tokenResponse struct {
 	ExpiresIn   int    `json:"expires_in"`
 }
 
-// User represents a Google Workspace directory user.
-type User struct {
-	ID           string   `json:"id"`
-	PrimaryEmail string   `json:"primaryEmail"`
-	Name         UserName `json:"name"`
-	OrgUnitPath  string   `json:"orgUnitPath"`
-	IsAdmin      bool     `json:"isAdmin"`
-	Suspended    bool     `json:"suspended"`
-	Archived     bool     `json:"archived"`
+// SkuGroup represents one Google Workspace SKU (subscription) and the set of
+// users currently assigned to it. Each SkuGroup maps to one Snipe-IT license.
+type SkuGroup struct {
+	ProductID   string
+	ProductName string
+	SkuID       string
+	SkuName     string
+	UserEmails  []string // lower-cased, sorted
 }
 
-// UserName holds the name components returned by the Directory API.
-type UserName struct {
-	FullName   string `json:"fullName"`
-	GivenName  string `json:"givenName"`
-	FamilyName string `json:"familyName"`
+// licenseAssignment is the raw record returned by the License Manager API.
+type licenseAssignment struct {
+	UserID      string `json:"userId"`    // user's primary email
+	ProductID   string `json:"productId"`
+	ProductName string `json:"productName"`
+	SkuID       string `json:"skuId"`
+	SkuName     string `json:"skuName"`
 }
 
-// Client calls the Google Admin SDK Directory API using a service account
-// with domain-wide delegation. Authentication is performed via a self-signed
-// JWT exchanged for a short-lived access token — no external OAuth2 library
-// is required.
+type licenseAssignmentPage struct {
+	Items         []licenseAssignment `json:"items"`
+	NextPageToken string              `json:"nextPageToken"`
+}
+
+// Client calls the Google Enterprise License Manager API using a service account
+// with domain-wide delegation. Auth is performed via a self-signed JWT exchanged
+// for a short-lived access token — no external OAuth2 library required.
 type Client struct {
 	adminEmail  string // Google Workspace super admin to impersonate
-	domain      string
-	ouPaths     []string // optional OU filter; empty = all users in domain
+	domain      string // primary domain (used as customerId in API calls)
 	privateKey  *rsa.PrivateKey
-	clientEmail string // service account email (used as JWT iss claim)
-	tokenURI    string // typically https://oauth2.googleapis.com/token
+	clientEmail string // service account email (JWT iss claim)
+	tokenURI    string
 	httpClient  *http.Client
 
 	mu          sync.Mutex
@@ -78,11 +97,11 @@ type Client struct {
 }
 
 // NewClientFromFile creates a Client from a service account JSON key file.
-// adminEmail must be a Google Workspace super admin. domain is the primary
-// Workspace domain (e.g. "example.com"). ouPaths optionally restricts the
-// user list to specific OUs and their subtrees; pass nil or an empty slice
-// to sync all users in the domain.
-func NewClientFromFile(credentialsFile, adminEmail, domain string, ouPaths []string) (*Client, error) {
+// adminEmail must be a Google Workspace super admin in domain. The service
+// account must have domain-wide delegation granted with the scope:
+//
+//	https://www.googleapis.com/auth/apps.licensing
+func NewClientFromFile(credentialsFile, adminEmail, domain string) (*Client, error) {
 	data, err := os.ReadFile(credentialsFile)
 	if err != nil {
 		return nil, fmt.Errorf("googleworkspace: reading credentials file: %w", err)
@@ -113,7 +132,6 @@ func NewClientFromFile(credentialsFile, adminEmail, domain string, ouPaths []str
 	return &Client{
 		adminEmail:  adminEmail,
 		domain:      domain,
-		ouPaths:     ouPaths,
 		privateKey:  rsaKey,
 		clientEmail: key.ClientEmail,
 		tokenURI:    tokenURI,
@@ -121,75 +139,84 @@ func NewClientFromFile(credentialsFile, adminEmail, domain string, ouPaths []str
 	}, nil
 }
 
-// ListActiveUsers returns all active (non-suspended, non-archived) users. If
-// ouPaths is configured, only users in those OUs (and subtrees) are returned;
-// duplicates across overlapping OUs are deduplicated by user ID.
-func (c *Client) ListActiveUsers(ctx context.Context) ([]User, error) {
+// ListLicenseAssignmentsBySku fetches all active license assignments for the
+// given productIDs and returns them grouped by SKU, sorted by SkuName. Each
+// SkuGroup's UserEmails slice is lower-cased and sorted.
+//
+// Only SKUs that have at least one active assignment are returned — if all
+// users lose a given SKU, it will not appear in the results. See CONTEXT.md
+// for implications on the checkin pass.
+func (c *Client) ListLicenseAssignmentsBySku(ctx context.Context, productIDs []string) ([]SkuGroup, error) {
 	if err := c.ensureToken(ctx); err != nil {
 		return nil, err
 	}
-	if len(c.ouPaths) > 0 {
-		return c.listByOUs(ctx)
-	}
-	return c.listUsersForOU(ctx, "")
-}
 
-func (c *Client) listByOUs(ctx context.Context) ([]User, error) {
-	seen := make(map[string]struct{})
-	var all []User
-	for _, ou := range c.ouPaths {
-		users, err := c.listUsersForOU(ctx, ou)
+	// skuKey → *SkuGroup
+	skuMap := make(map[string]*SkuGroup)
+
+	for _, productID := range productIDs {
+		assignments, err := c.listAssignmentsForProduct(ctx, productID)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("googleworkspace: listing assignments for product %q: %w", productID, err)
 		}
-		for _, u := range users {
-			if _, dup := seen[u.ID]; !dup {
-				seen[u.ID] = struct{}{}
-				all = append(all, u)
+		for _, a := range assignments {
+			key := a.ProductID + "/" + a.SkuID
+			g, ok := skuMap[key]
+			if !ok {
+				g = &SkuGroup{
+					ProductID:   a.ProductID,
+					ProductName: a.ProductName,
+					SkuID:       a.SkuID,
+					SkuName:     a.SkuName,
+				}
+				skuMap[key] = g
 			}
+			email := strings.ToLower(a.UserID)
+			g.UserEmails = append(g.UserEmails, email)
 		}
 	}
-	return all, nil
+
+	groups := make([]SkuGroup, 0, len(skuMap))
+	for _, g := range skuMap {
+		sort.Strings(g.UserEmails)
+		groups = append(groups, *g)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		return groups[i].SkuName < groups[j].SkuName
+	})
+	return groups, nil
 }
 
-func (c *Client) listUsersForOU(ctx context.Context, ouPath string) ([]User, error) {
-	var all []User
+func (c *Client) listAssignmentsForProduct(ctx context.Context, productID string) ([]licenseAssignment, error) {
+	var all []licenseAssignment
 	pageToken := ""
 	for {
 		params := url.Values{
-			"domain":     {c.domain},
-			"maxResults": {"500"},
-			"query":      {"isSuspended=false"},
-			"orderBy":    {"email"},
-		}
-		if ouPath != "" {
-			params.Set("orgUnitPath", ouPath)
+			"customerId": {c.domain},
+			"maxResults": {"1000"},
 		}
 		if pageToken != "" {
 			params.Set("pageToken", pageToken)
 		}
-		var page usersListPage
-		if err := c.get(ctx, apiBase+"/users?"+params.Encode(), &page); err != nil {
+		endpoint := fmt.Sprintf("%s/product/%s/users?%s",
+			licensingBase, url.PathEscape(productID), params.Encode())
+
+		var page licenseAssignmentPage
+		if err := c.get(ctx, endpoint, &page); err != nil {
+			// 404 means the product exists but has no assignments (or isn't
+			// provisioned for this domain). Treat as empty rather than failing.
+			if strings.Contains(err.Error(), "status 404") {
+				break
+			}
 			return nil, err
 		}
-		for _, u := range page.Users {
-			// isSuspended=false query excludes suspended users, but double-check
-			// and also exclude archived users (Google Workspace for Education).
-			if !u.Suspended && !u.Archived {
-				all = append(all, u)
-			}
-		}
+		all = append(all, page.Items...)
 		if page.NextPageToken == "" {
 			break
 		}
 		pageToken = page.NextPageToken
 	}
 	return all, nil
-}
-
-type usersListPage struct {
-	Users         []User `json:"users"`
-	NextPageToken string `json:"nextPageToken"`
 }
 
 // --- HTTP helper ---
@@ -220,8 +247,6 @@ func (c *Client) get(ctx context.Context, endpoint string, out any) error {
 
 // --- Token management ---
 
-// ensureToken obtains or refreshes the access token, using a 30-second buffer
-// before the actual expiry so in-flight requests don't race the expiry.
 func (c *Client) ensureToken(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -239,13 +264,10 @@ func (c *Client) ensureToken(ctx context.Context) error {
 
 func (c *Client) fetchToken(ctx context.Context) (string, time.Time, error) {
 	now := time.Now()
-	exp := now.Add(time.Hour)
-
-	jwt, err := c.buildJWT(now, exp)
+	jwt, err := c.buildJWT(now, now.Add(time.Hour))
 	if err != nil {
 		return "", time.Time{}, err
 	}
-
 	form := url.Values{
 		"grant_type": {jwtGrantType},
 		"assertion":  {jwt},
@@ -273,14 +295,14 @@ func (c *Client) fetchToken(ctx context.Context) (string, time.Time, error) {
 	return tr.AccessToken, now.Add(time.Duration(tr.ExpiresIn) * time.Second), nil
 }
 
-// buildJWT constructs the RS256-signed JWT assertion for the token exchange.
-// The sub claim is the admin email being impersonated (not the service account).
+// buildJWT constructs the RS256-signed JWT for the service account token exchange.
+// The sub claim must be the admin email being impersonated, not the service account.
 func (c *Client) buildJWT(iat, exp time.Time) (string, error) {
 	header := b64url(mustMarshal(map[string]string{"alg": "RS256", "typ": "JWT"}))
 	claims := b64url(mustMarshal(map[string]any{
 		"iss":   c.clientEmail,
 		"sub":   c.adminEmail,
-		"scope": directoryScope,
+		"scope": licensingScope,
 		"aud":   c.tokenURI,
 		"iat":   iat.Unix(),
 		"exp":   exp.Unix(),

@@ -16,8 +16,11 @@ import (
 
 var syncCmd = &cobra.Command{
 	Use:   "sync",
-	Short: "Sync active Google Workspace users into Snipe-IT license seats",
-	RunE:  runSync,
+	Short: "Sync active Google Workspace license assignments into Snipe-IT",
+	Long: `Queries the Google Enterprise License Manager API for all active SKU
+assignments and creates or updates one Snipe-IT license per SKU. Users who
+lose a Google Workspace license are automatically checked back in.`,
+	RunE: runSync,
 }
 
 func init() {
@@ -25,7 +28,7 @@ func init() {
 
 	syncCmd.Flags().Bool("dry-run", false, "simulate without making changes")
 	syncCmd.Flags().Bool("force", false, "re-sync even if notes appear up to date")
-	syncCmd.Flags().String("email", "", "sync a single user by email address")
+	syncCmd.Flags().String("email", "", "sync a single user by email across all their SKUs")
 
 	_ = viper.BindPFlag("sync.dry_run", syncCmd.Flags().Lookup("dry-run"))
 	_ = viper.BindPFlag("sync.force", syncCmd.Flags().Lookup("force"))
@@ -51,9 +54,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("snipe_it.license_category_id is required in settings.yaml")
 	}
 
-	ouPaths := viper.GetStringSlice("google_workspace.ou_paths")
-
-	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain, ouPaths)
+	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain)
 	if err != nil {
 		return fmt.Errorf("creating Google Workspace client: %w", err)
 	}
@@ -64,18 +65,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	emailFilter, _ := cmd.Flags().GetString("email")
 
-	licenseName := viper.GetString("snipe_it.license_name")
-	if licenseName == "" {
-		licenseName = "Google Workspace"
-	}
+	productIDs := viper.GetStringSlice("google_workspace.product_ids")
 
 	cfg := sync.Config{
 		DryRun:            viper.GetBool("sync.dry_run"),
 		Force:             viper.GetBool("sync.force"),
-		LicenseName:       licenseName,
 		LicenseCategoryID: categoryID,
 		ManufacturerID:    viper.GetInt("snipe_it.license_manufacturer_id"),
 		SupplierID:        viper.GetInt("snipe_it.license_supplier_id"),
+		ProductIDs:        productIDs,
+		LicenseNamePrefix: viper.GetString("google_workspace.license_name_prefix"),
+		LicenseNameSuffix: viper.GetString("google_workspace.license_name_suffix"),
 	}
 
 	if cfg.DryRun {

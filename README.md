@@ -1,20 +1,23 @@
 # googleworkspace2snipe
 
-Syncs active Google Workspace users into [Snipe-IT](https://snipeit.com/) as
-license seat assignments. Each active user (non-suspended, non-archived) is
-checked out a seat on a named Snipe-IT license. Users who are later suspended,
-archived, or removed are automatically checked back in.
+Syncs Google Workspace license assignments into [Snipe-IT](https://snipeit.com/).
+Each Google Workspace SKU (subscription) is created as a **separate Snipe-IT
+license** — for example, "Google Workspace Business Plus", "Google Voice Standard",
+and "AI Ultra Access" each become their own license entry with per-user seat
+assignments.
+
+Users are automatically checked out to the licenses they hold in Google Workspace
+and checked back in when a license is removed or a user is suspended.
 
 Authentication uses a Google Cloud service account with
 [domain-wide delegation](https://support.google.com/a/answer/162106) — no user
-interaction required. The binary runs fully headless and is suitable for
-scheduling via cron or a similar scheduler.
+interaction required. Runs fully headless; suitable for cron or similar schedulers.
 
 ---
 
 ## Requirements
 
-- A Google Cloud project with the Admin SDK API enabled
+- A Google Cloud project with the **Enterprise License Manager API** enabled
 - A service account with domain-wide delegation granted in the Google Admin Console
 - A Snipe-IT instance with an API key that has license management permissions
 
@@ -22,16 +25,22 @@ scheduling via cron or a similar scheduler.
 
 ## Google Cloud setup
 
-1. **Enable the Admin SDK API** in your Google Cloud project (APIs & Services → Library → "Admin SDK API").
+1. **Enable the Enterprise License Manager API** (APIs & Services → Library →
+   "Enterprise License Manager API").
 
-2. **Create a service account** (IAM & Admin → Service Accounts → Create). No Cloud IAM roles are required. After creating it, go to Keys → Add Key → Create New Key → JSON and download the key file.
+2. **Create a service account** (IAM & Admin → Service Accounts → Create). No Cloud
+   IAM roles are required. After creating it, go to Keys → Add Key → Create New Key
+   → JSON and download the key file.
 
 3. **Grant domain-wide delegation** in the [Google Admin Console](https://admin.google.com):
-   - Security → Access and data control → API controls → Manage Domain Wide Delegation → Add new
-   - **Client ID**: the service account's numeric Client ID (the `client_id` field in the JSON key)
-   - **OAuth Scopes**: `https://www.googleapis.com/auth/admin.directory.user.readonly`
+   - Security → Access and data control → API controls → Manage Domain Wide Delegation
+     → Add new
+   - **Client ID**: the service account's numeric Client ID (the `client_id` field in
+     the JSON key)
+   - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
 
-4. **Choose an admin email**: any Google Workspace super admin address in your domain. This is the account the service account will impersonate.
+4. **Choose an admin email**: any Google Workspace super admin address in your domain.
+   This is the account the service account will impersonate.
 
 ---
 
@@ -88,23 +97,59 @@ snipe_it:
   license_category_id: 42   # required; find in Admin → Categories
 ```
 
-### OU filtering
+### License naming (prefix / suffix)
 
-To sync only users in specific Organizational Units (and their subtrees):
+By default, Snipe-IT license names match the Google SKU name exactly:
+
+```
+Google Workspace Business Plus
+Google Voice Standard
+```
+
+Use `license_name_prefix` and/or `license_name_suffix` to customize:
 
 ```yaml
 google_workspace:
-  ou_paths:
-    - "/Engineering"
-    - "/Sales"
+  license_name_prefix: ""               # e.g. "Acme - "
+  license_name_suffix: " (acme.com)"    # e.g. for multi-tenant disambiguation
 ```
 
-Leave `ou_paths` empty (or omit it) to sync all active users in the domain.
+This produces:
+
+```
+Google Workspace Business Plus (acme.com)
+Google Voice Standard (acme.com)
+```
+
+The prefix and suffix are concatenated verbatim — include any desired separators
+(spaces, dashes, parentheses) in the values themselves.
+
+### Product IDs
+
+By default, the following product families are queried:
+
+- `Google-Apps` — Business / Enterprise / Education plans
+- `Google-Vault` — Google Vault
+- `Google-Drive-storage` — Additional storage
+- `Cloud-Identity` — Cloud Identity
+- `Google-Voice` — Google Voice
+
+To add products not in this default list (such as newer add-ons):
+
+```yaml
+google_workspace:
+  product_ids:
+    - "Google-Apps"
+    - "Google-Vault"
+    - "Google-Drive-storage"
+    - "Cloud-Identity"
+    - "Google-Voice"
+    - "YOUR-ADDON-PRODUCT-ID"   # add extras here
+```
+
+Only SKUs with at least one active assignment produce a Snipe-IT license.
 
 ### Environment variable overrides
-
-All sensitive values can be provided via environment variables instead of the
-config file:
 
 | Env var                   | Config key                          |
 |---------------------------|-------------------------------------|
@@ -125,19 +170,31 @@ config file:
 ./googleworkspace2snipe test
 ```
 
-Reports the number of active users in Google Workspace and the current state
-of the Snipe-IT license (if it exists).
+Lists all Google Workspace SKUs with active assignments and shows whether the
+corresponding Snipe-IT license already exists:
+
+```
+=== Google Workspace ===
+Domain:   acme.com
+Products: [Google-Apps Google-Vault ...]
+
+=== SKUs → Snipe-IT Licenses ===
+Snipe-IT License Name                               Users  Snipe-IT Status
+------------------------------------------------------------------------------------------
+Google Voice Standard                                   3  id=42 seats=3 free=0
+Google Workspace Business Plus                         67  id=38 seats=70 free=3
+```
 
 ### Run a sync
 
 ```sh
-# Dry run — no changes made
+# Dry run — see what would change without making any changes
 ./googleworkspace2snipe sync --dry-run
 
 # Real sync
 ./googleworkspace2snipe sync
 
-# Sync a single user
+# Sync all licenses for a single user
 ./googleworkspace2snipe sync --email user@your-domain.example.com
 
 # Force re-sync of all seat notes (even if unchanged)
@@ -159,15 +216,15 @@ of the Snipe-IT license (if it exists).
 
 ## Snipe-IT seat notes
 
-Each seat's `notes` field is set to:
+Each seat's `notes` field contains stable identifiers for debugging:
 
 ```
-org_unit: /Engineering
-is_admin: false
+product_id: Google-Apps
+sku_id: 1010020025
 ```
 
-Notes are updated automatically when a user moves OUs or their admin status
-changes. Use `--force` to re-sync all notes regardless of current state.
+These values are written once on checkout and do not change, so subsequent syncs
+show seats as `skipped`. Use `--force` to rewrite all notes.
 
 ---
 
@@ -177,7 +234,8 @@ Set `slack.webhook_url` in `settings.yaml` (or `SLACK_WEBHOOK` env var) to
 receive notifications for:
 
 - Sync failures
-- Google Workspace users with no matching Snipe-IT account
+- Google Workspace users with no matching Snipe-IT account (deduplicated — one
+  message per user even if they hold multiple licenses)
 - Sync completion summaries
 
 All notifications are suppressed in `--dry-run` mode.

@@ -7,10 +7,11 @@ Cross-cutting conventions live in `CLAUDE.md`.
 
 ## Purpose
 
-Syncs active Google Workspace users (non-suspended, non-archived) into Snipe-IT
-as license seat assignments. Each active user is checked out a seat on a named
-Snipe-IT license (default: `"Google Workspace"`). Users who are suspended,
-archived, or removed are checked back in automatically.
+Syncs Google Workspace license assignments into Snipe-IT. Each Google Workspace
+SKU (subscription) is created as a **separate Snipe-IT license** — for example,
+"Google Workspace Business Plus", "Google Voice Standard", and "AI Ultra Access"
+each become their own Snipe-IT license entry. Users are checked out to the
+specific licenses they hold, and checked back in when a license is removed.
 
 ---
 
@@ -25,16 +26,16 @@ required — it runs fully headless.
 ### Required OAuth 2.0 scope
 
 ```
-https://www.googleapis.com/auth/admin.directory.user.readonly
+https://www.googleapis.com/auth/apps.licensing
 ```
 
 ### Setup steps
 
 1. **Create or choose a Google Cloud project** where your service account will live.
 
-2. **Enable the Admin SDK API**:
+2. **Enable the Enterprise License Manager API**:
    - Go to APIs & Services → Library in the Cloud Console.
-   - Search for "Admin SDK API" and enable it.
+   - Search for "Enterprise License Manager API" and enable it.
 
 3. **Create a service account**:
    - Go to IAM & Admin → Service Accounts → Create Service Account.
@@ -45,29 +46,50 @@ https://www.googleapis.com/auth/admin.directory.user.readonly
 4. **Grant domain-wide delegation** in the Google Admin Console
    (admin.google.com, not Cloud Console):
    - Go to Security → Access and data control → API controls →
-     Manage Domain Wide Delegation.
-   - Click "Add new" and enter:
-     - **Client ID**: the service account's numeric client ID (found in the JSON
-       key as `client_id`, or in the Cloud Console under the service account).
-     - **OAuth Scopes**: `https://www.googleapis.com/auth/admin.directory.user.readonly`
+     Manage Domain Wide Delegation → Add new.
+   - Enter:
+     - **Client ID**: the service account's numeric client ID (the `client_id`
+       field in the JSON key file, or shown as "Unique ID" in the Cloud Console).
+     - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
 
 5. **Choose an admin email** (`google_workspace.admin_email`): any super admin
-   address in the domain. The service account impersonates this account to call
-   the Directory API. The account must be a super admin, not just a delegated
-   admin.
+   address in the domain. The service account impersonates this account. The
+   account must be a super admin, not just a delegated admin.
 
 ---
 
 ## API details
 
-- **Base URL**: `https://admin.googleapis.com/admin/directory/v1`
-- **Users endpoint**: `GET /users?domain={domain}&maxResults=500&query=isSuspended=false`
-- **Pagination**: uses `nextPageToken` in the response body; follow until empty.
-- **OU filter**: set `orgUnitPath=/Path/To/OU`; returns users in that OU and all
-  sub-OUs. Multiple OUs are fetched in separate requests; duplicates are
-  deduplicated by user ID.
-- **Active user filter**: `isSuspended=false` in the query parameter excludes
-  suspended users. The `archived` field is checked in code as a secondary filter.
+- **API**: Google Enterprise License Manager API (not the Directory API)
+- **Base URL**: `https://licensing.googleapis.com/apps/licensing/v1`
+- **Endpoint**: `GET /product/{productId}/users?customerId={domain}&maxResults=1000`
+- **Pagination**: uses `nextPageToken` in the response body; followed until empty.
+- **Response**: returns `LicenseAssignment` objects with `userId` (email), `productId`,
+  `skuId`, `skuName`, and `productName` for each active assignment.
+- **SKU grouping**: the client groups all assignments by (productId, skuId) to
+  produce one `SkuGroup` per distinct SKU. Each `SkuGroup` maps to one Snipe-IT license.
+
+### Product IDs
+
+The following product IDs are queried by default when `product_ids` is not set:
+
+| Product ID              | Products covered                                     |
+|-------------------------|------------------------------------------------------|
+| `Google-Apps`           | Google Workspace Business / Enterprise / Education   |
+| `Google-Vault`          | Google Vault                                         |
+| `Google-Drive-storage`  | Google additional storage                            |
+| `Cloud-Identity`        | Cloud Identity Free / Premium                        |
+| `Google-Voice`          | Google Voice Starter / Standard / Premier            |
+
+Add additional product IDs to `google_workspace.product_ids` in `settings.yaml`
+if your domain uses products not covered by this list. The full list is documented
+at https://developers.google.com/admin-sdk/licensing/v1/how-tos/products.
+
+**Note on add-ons** (e.g. AI Ultra Access, Gemini): newer Google Workspace add-ons
+may use product IDs not in the default list. If a subscription appears in the
+Google Admin Console but not in `test` output, add its product ID to
+`google_workspace.product_ids`. You can find product IDs via the Google Admin
+SDK API Explorer or by inspecting network traffic in the Admin Console.
 
 ---
 
@@ -80,15 +102,16 @@ google_workspace:
   credentials_file: "path/to/service-account.json"
   admin_email: "admin@your-domain.example.com"
   domain: "your-domain.example.com"
-  ou_paths: []   # optional; empty = all users
+  product_ids: []                  # optional; empty = DefaultProductIDs
+  license_name_prefix: ""          # e.g. "Acme - "
+  license_name_suffix: ""          # e.g. " (acme.com)"
 
 snipe_it:
   url: "https://snipe.your-domain.example.com"
   api_key: ""
-  license_name: "Google Workspace"
-  license_category_id: 0     # required
-  license_manufacturer_id: 0  # optional; 0 = auto find/create "Google"
-  license_supplier_id: 0      # optional
+  license_category_id: 0           # required
+  license_manufacturer_id: 0       # optional; 0 = auto find/create "Google"
+  license_supplier_id: 0           # optional
 
 sync:
   dry_run: false
@@ -100,68 +123,99 @@ slack:
 
 ### Environment variable overrides
 
-| Env var                  | Config key                            |
-|--------------------------|---------------------------------------|
-| `GOOGLE_CREDENTIALS_FILE`| `google_workspace.credentials_file`   |
-| `GOOGLE_ADMIN_EMAIL`     | `google_workspace.admin_email`        |
-| `GOOGLE_DOMAIN`          | `google_workspace.domain`             |
-| `SNIPE_URL`              | `snipe_it.url`                        |
-| `SNIPE_TOKEN`            | `snipe_it.api_key`                    |
-| `SLACK_WEBHOOK`          | `slack.webhook_url`                   |
+| Env var                   | Config key                            |
+|---------------------------|---------------------------------------|
+| `GOOGLE_CREDENTIALS_FILE` | `google_workspace.credentials_file`   |
+| `GOOGLE_ADMIN_EMAIL`      | `google_workspace.admin_email`        |
+| `GOOGLE_DOMAIN`           | `google_workspace.domain`             |
+| `SNIPE_URL`               | `snipe_it.url`                        |
+| `SNIPE_TOKEN`             | `snipe_it.api_key`                    |
+| `SLACK_WEBHOOK`           | `slack.webhook_url`                   |
 
-`ou_paths` cannot be overridden via a single env var (it is a list); set it in
-`settings.yaml`.
+`product_ids`, `license_name_prefix`, and `license_name_suffix` cannot be
+overridden via env vars; set them in `settings.yaml`.
+
+---
+
+## License naming
+
+The Snipe-IT license name for each SKU is:
+
+```
+{license_name_prefix}{Google SKU name}{license_name_suffix}
+```
+
+Prefix and suffix are concatenated verbatim — include any separator characters
+(spaces, dashes, parentheses) in the prefix/suffix values themselves.
+
+**Examples:**
+
+| SKU Name                      | Prefix       | Suffix        | Snipe-IT License Name                              |
+|-------------------------------|--------------|---------------|----------------------------------------------------|
+| Google Workspace Business Plus | *(empty)*    | *(empty)*     | `Google Workspace Business Plus`                   |
+| Google Voice Standard          | `"Acme - "`  | *(empty)*     | `Acme - Google Voice Standard`                     |
+| Google Workspace Business Plus | *(empty)*    | `" (acme.com)"` | `Google Workspace Business Plus (acme.com)`     |
 
 ---
 
 ## Seat notes format
 
-The `notes` field written to each Snipe-IT seat contains:
+The `notes` field written to each Snipe-IT seat contains stable identifiers
+useful for debugging:
 
 ```
-org_unit: /Engineering
-is_admin: false
+product_id: Google-Apps
+sku_id: 1010020025
 ```
 
-`org_unit` reflects the user's current Google Workspace organizational unit path.
-`is_admin` is `true` for super admins.
+These values never change for a given license, so notes are written once on
+checkout and not updated on subsequent syncs (seats show as `skipped`). Use
+`--force` to rewrite notes on all existing seats.
 
 ---
 
 ## Google-specific gotchas
 
 1. **Token exchange, not OAuth flow.** The service account JWT is exchanged for a
-   short-lived access token at `https://oauth2.googleapis.com/token`. Tokens
-   expire after 1 hour; the client caches and refreshes automatically with a
-   30-second buffer.
+   short-lived access token at the token URI in the credentials file. Tokens expire
+   after 1 hour; the client caches and refreshes automatically with a 30-second buffer.
 
 2. **`sub` claim = admin email, not service account email.** The JWT's `sub` claim
    must be the Google Workspace admin being impersonated, not the service account's
-   own email (`client_email`). This is the most common DWD misconfiguration.
+   own `client_email`. This is the most common DWD misconfiguration.
 
-3. **Client ID vs client email.** DWD is granted using the service account's
-   numeric **Client ID** (the `client_id` field in the JSON key, also shown as
-   "Unique ID" in the Cloud Console). The client email (`...@...iam.gserviceaccount.com`)
-   is used in the JWT `iss` claim but is not what you enter in the Admin Console.
+3. **Client ID vs client email.** DWD is granted using the service account's numeric
+   **Client ID** (the `client_id` field in the JSON key, shown as "Unique ID" in the
+   Cloud Console). The client email (`...@...iam.gserviceaccount.com`) is used in the
+   JWT `iss` claim but is not what you enter in the Admin Console.
 
-4. **Pagination is required.** The API returns at most 500 users per page.
-   `nextPageToken` must be followed until empty or users will be silently missed.
+4. **Scope mismatch.** If you previously granted the Directory scope
+   (`admin.directory.user.readonly`) for an earlier version of this integration,
+   you must also add the licensing scope (`apps.licensing`) in the Admin Console
+   DWD page. Both scopes can coexist on the same service account entry.
 
-5. **Suspended ≠ deleted.** `isSuspended=false` in the query excludes suspended
-   users. Archived users (Google Workspace for Education) have `archived: true`
-   in the response body; these are filtered in code. Deleted users do not appear
-   in the default list response.
+5. **404 on product IDs.** If a product ID is not provisioned for the domain, the
+   API returns 404. The client treats this as "no assignments" rather than an error,
+   so listing unused products in `product_ids` is harmless.
 
-6. **OU path format.** Must start with `/` (e.g. `/Engineering`, not `Engineering`).
-   The root OU is `/`.
+6. **Pagination is required.** The API returns at most 1000 assignments per page.
+   `nextPageToken` is followed until empty.
 
-7. **Duplicate users across OUs.** When multiple `ou_paths` are configured, a user
-   can theoretically appear in results for two OUs (if OU paths overlap). The
-   client deduplicates by user ID before returning.
+7. **Zero-assignment SKUs are invisible.** If all users of a SKU lose that license,
+   it no longer appears in API results. Snipe-IT seats that were previously checked
+   out will remain checked out until at least one user holds the SKU again (triggering
+   the checkin pass) or an admin manually checks them in. This is a known limitation
+   of the License Manager API — there is no endpoint to enumerate SKUs with zero
+   assignments.
 
-8. **Admin SDK quota.** The Directory API has a default quota of 1,500 requests
-   per 100 seconds per user. At typical org sizes (< 50,000 users), a single
-   paginated list call is 1–100 requests and will not approach this limit.
+8. **`userId` is the primary email.** The `userId` field in license assignment
+   responses is the user's primary email address (not a numeric ID), even though
+   the field name implies otherwise. Matching to Snipe-IT users is done by
+   lowercased email.
+
+9. **Add-on product IDs.** Newer add-ons (AI Ultra Access, Gemini, etc.) may have
+   product IDs outside the default list. Use `test` to verify all expected SKUs
+   appear, and add missing product IDs to `google_workspace.product_ids`.
 
 ---
 
@@ -175,13 +229,13 @@ cmd/
   test.go        # test command
 internal/
   googleworkspace/
-    client.go    # Admin SDK client with service account DWD auth
+    client.go    # License Manager API client with service account DWD auth
   slack/
     client.go    # Slack webhook client (verbatim from CLAUDE.md)
   snipeit/
     client.go    # Snipe-IT API client (verbatim from CLAUDE.md)
   sync/
-    syncer.go    # core sync logic
+    syncer.go    # per-SKU sync logic
     result.go    # Result struct
 .github/
   workflows/

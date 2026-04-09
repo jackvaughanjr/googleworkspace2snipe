@@ -242,6 +242,16 @@ All notifications are suppressed in `--dry-run` mode.
 
 ---
 
+## Roadmap
+
+<!-- TODO: add a `discover` command that connects to the configured Google Workspace,
+enumerates all product IDs with at least one active license assignment, and
+writes the discovered product_ids list back into settings.yaml automatically.
+This removes the need to manually research and maintain product IDs for add-ons
+and newer Google Workspace products that fall outside the built-in default list. -->
+
+---
+
 ## Releases
 
 Releases are built automatically by GitHub Actions on `v*` tag push:

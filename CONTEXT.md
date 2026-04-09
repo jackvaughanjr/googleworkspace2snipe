@@ -91,6 +91,17 @@ Google Admin Console but not in `test` output, add its product ID to
 `google_workspace.product_ids`. You can find product IDs via the Google Admin
 SDK API Explorer or by inspecting network traffic in the Admin Console.
 
+<!-- TODO: implement a `discover` command that connects to the configured Google
+Workspace, enumerates all product IDs that have at least one active license
+assignment (by iterating the known master product list from Google's docs, or
+via a future API endpoint if one becomes available), and writes the discovered
+product_ids list back into settings.yaml automatically. This solves the add-on
+discovery problem without requiring the user to research product IDs manually.
+Implementation note: the License Manager API has no "list all products for a
+customer" endpoint as of 2026-04; discovery must be done by querying each known
+product ID and collecting non-404 responses. The full known list is at
+https://developers.google.com/admin-sdk/licensing/v1/how-tos/products -->
+
 ---
 
 ## Config schema

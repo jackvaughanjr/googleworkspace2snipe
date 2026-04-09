@@ -1,0 +1,71 @@
+# googleworkspace2snipe configuration
+# Copy this file to settings.yaml and fill in your values.
+# settings.yaml is gitignored and should never be committed.
+#
+# All values can be overridden with environment variables.
+# See CONTEXT.md for the full list of env var overrides and Google Cloud setup.
+
+google_workspace:
+  # Path to the service account JSON key file.
+  # The service account must have domain-wide delegation granted in the
+  # Google Admin Console with the scope:
+  #   https://www.googleapis.com/auth/admin.directory.user.readonly
+  # See CONTEXT.md for full setup instructions.
+  credentials_file: "path/to/service-account.json"
+
+  # Email address of a Google Workspace super admin to impersonate.
+  # The service account acts on behalf of this account to list users.
+  # Must be a super admin (not just a delegated admin).
+  admin_email: "admin@your-domain.example.com"
+
+  # Your Google Workspace primary domain (e.g. "example.com").
+  domain: "your-domain.example.com"
+
+  # Optional: restrict sync to specific Organizational Units (and subtrees).
+  # Leave empty to sync all active users in the domain.
+  # Each path must start with "/" (e.g. "/Engineering", "/Sales").
+  # The root OU is "/".
+  ou_paths: []
+
+snipe_it:
+  # Base URL of your Snipe-IT instance.
+  url: "https://your-snipe-it-instance.example.com"
+
+  # Snipe-IT API key with license management permissions.
+  # Generate one at: Admin → API Keys
+  api_key: ""
+
+  # Name of the license to assign seats to.
+  # Created automatically on first run if it does not exist.
+  license_name: "Google Workspace"
+
+  # Snipe-IT category ID to assign to the license when created. Required.
+  # Find IDs at: Admin → Categories, or via the Snipe-IT API.
+  license_category_id: 0
+
+  # Optional: manufacturer ID for "Google".
+  # If 0, googleworkspace2snipe will automatically find or create a
+  # "Google" manufacturer in Snipe-IT on the first run.
+  license_manufacturer_id: 0
+
+  # Optional: supplier ID. If 0, no supplier is set on the license.
+  license_supplier_id: 0
+
+sync:
+  # Simulate a full sync without making any changes.
+  # Overridden by the --dry-run flag.
+  dry_run: false
+
+  # Re-sync seat notes even if they appear up to date.
+  # Overridden by the --force flag.
+  force: false
+
+slack:
+  # Incoming webhook URL for Slack notifications.
+  # Optional. If omitted, all notifications are silently skipped.
+  # Can be overridden with the SLACK_WEBHOOK environment variable.
+  # Three events trigger notifications (all suppressed in dry-run):
+  #   1. Sync failure
+  #   2. Active Google Workspace user with no matching Snipe-IT account
+  #   3. Sync success summary
+  webhook_url: ""

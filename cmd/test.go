@@ -91,6 +91,11 @@ func runTest(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	if err := gwsClient.ValidateAPIs(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "API access check failed: %v\n", err)
+		return err
+	}
+
 	skuGroups, err := gwsClient.ListLicenseAssignmentsBySku(ctx, productIDs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Google Workspace error: %v\n", err)

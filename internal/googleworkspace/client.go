@@ -82,6 +82,15 @@ type UserName struct {
 	FamilyName string `json:"familyName"`
 }
 
+// googleAPIError is the error envelope returned by Google APIs on failure.
+type googleAPIError struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+	} `json:"error"`
+}
+
 type licenseAssignment struct {
 	UserID      string `json:"userId"`
 	ProductID   string `json:"productId"`
@@ -302,6 +311,84 @@ func (c *Client) getUsersForOU(ctx context.Context, ouPath string) ([]User, erro
 		pageToken = page.NextPageToken
 	}
 	return all, nil
+}
+
+// --- API validation ---
+
+// ValidateAPIs probes each required Google API with a minimal request to verify
+// access before running a full sync. It distinguishes between an API that is not
+// enabled in the GCP project and a DWD scope that is missing in the Admin Console,
+// so the error message tells the user exactly what to fix.
+func (c *Client) ValidateAPIs(ctx context.Context) error {
+	if err := c.ensureToken(ctx); err != nil {
+		return err
+	}
+
+	// Always validate the Enterprise License Manager API.
+	licensingProbe := fmt.Sprintf("%s/product/Google-Apps/users?customerId=%s&maxResults=1",
+		licensingBase, url.QueryEscape(c.domain))
+	if err := c.checkAPIAccess(ctx, licensingProbe,
+		"Enterprise License Manager API (licensing.googleapis.com)",
+		"Enable it in the GCP console: APIs & Services → Library → \"Enterprise License Manager API\"",
+	); err != nil {
+		return err
+	}
+
+	// Validate the Directory API only when the scope was requested.
+	if strings.Contains(c.scope, directoryScope) {
+		directoryProbe := fmt.Sprintf("%s/users?domain=%s&maxResults=1",
+			directoryBase, url.QueryEscape(c.domain))
+		if err := c.checkAPIAccess(ctx, directoryProbe,
+			"Admin SDK API (admin.googleapis.com)",
+			"Enable it in the GCP console: APIs & Services → Library → \"Admin SDK API\"",
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// checkAPIAccess makes a single probe request and returns a human-readable error
+// if the API is disabled or the DWD scope is not granted. A 404 response is treated
+// as success (product not provisioned but API is reachable).
+func (c *Client) checkAPIAccess(ctx context.Context, endpoint, apiName, enableHint string) error {
+	c.mu.Lock()
+	token := c.accessToken
+	c.mu.Unlock()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("googleworkspace: checking %s: %w", apiName, err)
+	}
+	defer resp.Body.Close()
+
+	// 200 and 404 both mean the API is reachable.
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	var apiErr googleAPIError
+	_ = json.Unmarshal(body, &apiErr)
+	msg := apiErr.Error.Message
+
+	if resp.StatusCode == http.StatusForbidden {
+		if strings.Contains(msg, "has not been used") || strings.Contains(msg, "disabled") {
+			return fmt.Errorf("googleworkspace: %s is not enabled in your GCP project\n  Hint: %s", apiName, enableHint)
+		}
+		// PERMISSION_DENIED — API is enabled but DWD scope is missing.
+		return fmt.Errorf("googleworkspace: PERMISSION_DENIED accessing %s\n  Check that the required OAuth scope is granted in the Google Admin Console under Security → API controls → Domain-wide Delegation\n  Error: %s", apiName, msg)
+	}
+
+	return fmt.Errorf("googleworkspace: unexpected status %d from %s: %s", resp.StatusCode, apiName, string(body))
 }
 
 // --- HTTP helper ---

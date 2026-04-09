@@ -69,11 +69,6 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	emailFilter, _ := cmd.Flags().GetString("email")
 
-	licenseName := viper.GetString("snipe_it.license_name")
-	if licenseName == "" {
-		licenseName = "Google Workspace"
-	}
-
 	cfg := sync.Config{
 		DryRun:            viper.GetBool("sync.dry_run"),
 		Force:             viper.GetBool("sync.force"),
@@ -93,6 +88,17 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	slackClient := slack.NewClient(viper.GetString("slack.webhook_url"))
 	ctx := context.Background()
+
+	if err := gwsClient.ValidateAPIs(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "API access check failed: %v\n", err)
+		if !cfg.DryRun {
+			msg := fmt.Sprintf("googleworkspace2snipe sync failed: %v", err)
+			if notifyErr := slackClient.Send(ctx, msg); notifyErr != nil {
+				slog.Warn("slack notification failed", "error", notifyErr)
+			}
+		}
+		return err
+	}
 
 	syncer := sync.NewSyncer(gwsClient, snipeClient, cfg)
 	result, err := syncer.Run(ctx, emailFilter)

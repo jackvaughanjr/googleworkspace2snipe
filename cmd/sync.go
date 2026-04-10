@@ -40,18 +40,18 @@ func runSync(cmd *cobra.Command, args []string) error {
 	domain := viper.GetString("google_workspace.domain")
 
 	if credFile == "" {
-		return fmt.Errorf("google_workspace.credentials_file is required in settings.yaml")
+		return fatal("google_workspace.credentials_file is required in settings.yaml")
 	}
 	if adminEmail == "" {
-		return fmt.Errorf("google_workspace.admin_email is required in settings.yaml")
+		return fatal("google_workspace.admin_email is required in settings.yaml")
 	}
 	if domain == "" {
-		return fmt.Errorf("google_workspace.domain is required in settings.yaml")
+		return fatal("google_workspace.domain is required in settings.yaml")
 	}
 
 	categoryID := viper.GetInt("snipe_it.license_category_id")
 	if categoryID == 0 {
-		return fmt.Errorf("snipe_it.license_category_id is required in settings.yaml")
+		return fatal("snipe_it.license_category_id is required in settings.yaml")
 	}
 
 	ouPaths := viper.GetStringSlice("google_workspace.ou_paths")
@@ -60,7 +60,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain, needsDirectory)
 	if err != nil {
-		return fmt.Errorf("creating Google Workspace client: %w", err)
+		return fatal("creating Google Workspace client: %v", err)
 	}
 	snipeClient := snipeit.NewClient(
 		viper.GetString("snipe_it.url"),

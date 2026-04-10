@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -15,6 +16,11 @@ var rootCmd = &cobra.Command{
 	Use:   "googleworkspace2snipe",
 	Short: "Sync active Google Workspace users into Snipe-IT as license seat assignments",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		// Suppress usage and cobra's duplicate "Error: ..." echo for all runtime
+		// errors. Flag parsing errors (wrong flags, unknown commands) still show
+		// usage because they fire before PersistentPreRunE runs.
+		cmd.Root().SilenceUsage = true
+		cmd.Root().SilenceErrors = true
 		initLogging()
 		return nil
 	},
@@ -29,6 +35,14 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
+}
+
+// fatal prints an error to stderr and returns it. Use instead of bare
+// return fmt.Errorf(...) in RunE so errors are visible when SilenceErrors is set.
+func fatal(format string, a ...any) error {
+	err := fmt.Errorf(format, a...)
+	fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	return err
 }
 
 func init() {

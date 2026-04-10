@@ -2,12 +2,16 @@
 
 Syncs Google Workspace license assignments into [Snipe-IT](https://snipeit.com/).
 Each Google Workspace SKU (subscription) is created as a **separate Snipe-IT
-license** — for example, "Google Workspace Business Plus", "Google Voice Standard",
-and "AI Ultra Access" each become their own license entry with per-user seat
-assignments.
+license** — for example, "Google Workspace Business Plus" and "Google Vault" each
+become their own license entry with per-user seat assignments.
 
 Users are automatically checked out to the licenses they hold in Google Workspace
 and checked back in when a license is removed or a user is suspended.
+
+> **Note:** only licenses exposed by the [Google Enterprise License Manager API](https://developers.google.com/admin-sdk/licensing/overview)
+> can be synced. Certain "Google Workspace add-on" subscription types (e.g. Google
+> Voice Standard, AI Ultra Access) are not accessible through this API and cannot
+> be synced.
 
 Authentication uses a Google Cloud service account with
 [domain-wide delegation](https://support.google.com/a/answer/162106) — no user
@@ -118,7 +122,7 @@ By default, Snipe-IT license names match the Google SKU name exactly:
 
 ```
 Google Workspace Business Plus
-Google Voice Standard
+Google Vault
 ```
 
 Use `license_name_prefix` and/or `license_name_suffix` to customize:
@@ -133,7 +137,7 @@ This produces:
 
 ```
 Google Workspace Business Plus (acme.com)
-Google Voice Standard (acme.com)
+Google Vault (acme.com)
 ```
 
 The prefix and suffix are concatenated verbatim — include any desired separators
@@ -202,10 +206,9 @@ By default, the following product families are queried:
 - `Google-Apps` — Business / Enterprise / Education plans
 - `Google-Vault` — Google Vault
 - `Google-Drive-storage` — Additional storage
-- `Cloud-Identity` — Cloud Identity
-- `Google-Voice` — Google Voice
 
-To add products not in this default list (such as newer add-ons):
+To add products not in this default list, run `discover` (see [Usage](#usage)) or
+set `product_ids` manually:
 
 ```yaml
 google_workspace:
@@ -213,12 +216,15 @@ google_workspace:
     - "Google-Apps"
     - "Google-Vault"
     - "Google-Drive-storage"
-    - "Cloud-Identity"
-    - "Google-Voice"
-    - "YOUR-ADDON-PRODUCT-ID"   # add extras here
+    - "101031"   # Google Workspace Migrate — example of a non-default product
 ```
 
 Only SKUs with at least one active assignment produce a Snipe-IT license.
+
+Not all subscriptions visible in the Google Admin Console are accessible via the
+Enterprise License Manager API. "Google Workspace add-on" subscription types such
+as Google Voice Standard and AI Ultra Access return `400 Invalid productId` from
+the API and cannot be synced — this is an API-level limitation.
 
 ### Environment variable overrides
 
@@ -235,6 +241,33 @@ Only SKUs with at least one active assignment produce a Snipe-IT license.
 
 ## Usage
 
+### Discover product IDs
+
+```sh
+./googleworkspace2snipe discover
+```
+
+Probes all known Google Workspace product IDs and writes the active ones back
+into `settings.yaml` as `google_workspace.product_ids`. Run this once when
+setting up a new domain or when you suspect you have add-ons outside the
+built-in default list.
+
+```
+Probing 4 known Google Workspace product IDs...
+
+  Google-Apps                               active
+  Google-Vault                              not found
+  Google-Drive-storage                      not found
+  101031                                    not found
+
+Active product IDs (1):
+  - Google-Apps
+
+Updated google_workspace.product_ids in settings.yaml
+```
+
+Use `--dry-run` to print the discovered list without modifying `settings.yaml`.
+
 ### Validate connections
 
 ```sh
@@ -247,12 +280,11 @@ corresponding Snipe-IT license already exists:
 ```
 === Google Workspace ===
 Domain:   acme.com
-Products: [Google-Apps Google-Vault ...]
+Products: [Google-Apps Google-Vault Google-Drive-storage]
 
 === SKUs → Snipe-IT Licenses ===
 Snipe-IT License Name                               Users  Snipe-IT Status
 ------------------------------------------------------------------------------------------
-Google Voice Standard                                   3  id=42 seats=3 free=0
 Google Workspace Business Plus                         67  id=38 seats=70 free=3
 ```
 
@@ -321,12 +353,6 @@ All notifications are suppressed in `--dry-run` mode.
   the license assignment data available at sync time (email, display name).
   Without this flag the current behaviour (warn + skip + Slack notification) is
   preserved.
-
-- **`discover` command** — Connect to the configured Google Workspace, enumerate
-  all product IDs with at least one active license assignment, and write the
-  discovered `product_ids` list back into `settings.yaml` automatically. This
-  removes the need to manually research and maintain product IDs for add-ons and
-  newer Google Workspace products that fall outside the built-in default list.
 
 ---
 

@@ -36,8 +36,18 @@ var DefaultProductIDs = []string{
 	"Google-Apps",          // Google Workspace Business / Enterprise / Education
 	"Google-Vault",         // Google Vault
 	"Google-Drive-storage", // Google additional storage
-	"Cloud-Identity",       // Cloud Identity Free / Premium
-	"Google-Voice",         // Google Voice Starter / Standard / Premier
+}
+
+// KnownProductIDs is the comprehensive list probed by the discover command.
+// Only includes product IDs that are valid in the Enterprise License Manager API.
+// Note: "Google Workspace add-on" subscription types (e.g. Google Voice Standard,
+// AI Ultra Access) return 400 "Invalid productId" from the Licensing API and
+// cannot be discovered or synced — they are not exposed through this API.
+var KnownProductIDs = []string{
+	"Google-Apps",          // Google Workspace Business / Enterprise / Education
+	"Google-Vault",         // Google Vault
+	"Google-Drive-storage", // Google additional storage
+	"101031",               // Google Workspace Migrate
 }
 
 type serviceAccountKey struct {
@@ -228,8 +238,12 @@ func (c *Client) listAssignmentsForProduct(ctx context.Context, productID string
 			licensingBase, url.PathEscape(productID), params.Encode())
 		var page licenseAssignmentPage
 		if err := c.get(ctx, endpoint, &page); err != nil {
-			if strings.Contains(err.Error(), "status 404") {
-				break // product not provisioned for this domain
+			// 404 = product not provisioned; 400 "Invalid productId" = not a Licensing
+			// API product (e.g. add-ons like Voice Standard purchased via Workspace).
+			// Both are treated as "no assignments" rather than a fatal error.
+			if strings.Contains(err.Error(), "status 404") ||
+				(strings.Contains(err.Error(), "status 400") && strings.Contains(err.Error(), "Invalid productId")) {
+				break
 			}
 			return nil, err
 		}
@@ -240,6 +254,32 @@ func (c *Client) listAssignmentsForProduct(ctx context.Context, productID string
 		pageToken = page.NextPageToken
 	}
 	return all, nil
+}
+
+// ProbeProductHasAssignments returns true if the given productID has at least one
+// active license assignment in the domain. A 404 response means the product is not
+// provisioned (returns false, nil). Used by the discover command.
+func (c *Client) ProbeProductHasAssignments(ctx context.Context, productID string) (bool, error) {
+	if err := c.ensureToken(ctx); err != nil {
+		return false, err
+	}
+	params := url.Values{
+		"customerId": {c.domain},
+		"maxResults": {"1"},
+	}
+	endpoint := fmt.Sprintf("%s/product/%s/users?%s",
+		licensingBase, url.PathEscape(productID), params.Encode())
+	var page licenseAssignmentPage
+	if err := c.get(ctx, endpoint, &page); err != nil {
+		// 404 = product not provisioned; 400 "Invalid productId" = unknown product.
+		// Both mean "no assignments here" for discovery purposes.
+		if strings.Contains(err.Error(), "status 404") ||
+			(strings.Contains(err.Error(), "status 400") && strings.Contains(err.Error(), "Invalid productId")) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(page.Items) > 0, nil
 }
 
 // --- Directory API ---

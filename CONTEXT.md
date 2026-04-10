@@ -9,9 +9,14 @@ Cross-cutting conventions live in `CLAUDE.md`.
 
 Syncs Google Workspace license assignments into Snipe-IT. Each Google Workspace
 SKU (subscription) is created as a **separate Snipe-IT license** — for example,
-"Google Workspace Business Plus", "Google Voice Standard", and "AI Ultra Access"
-each become their own Snipe-IT license entry. Users are checked out to the
-specific licenses they hold, and checked back in when a license is removed.
+"Google Workspace Business Plus" and "Google Vault" each become their own
+Snipe-IT license entry. Users are checked out to the specific licenses they hold,
+and checked back in when a license is removed.
+
+**API scope**: only licenses exposed by the Google Enterprise License Manager API
+can be synced. Certain "Google Workspace add-on" subscription types (e.g. Google
+Voice Standard, AI Ultra Access) return `400 Invalid productId` from this API and
+are not accessible — see gotcha #9 below.
 
 ---
 
@@ -101,18 +106,16 @@ The following product IDs are queried by default when `product_ids` is not set:
 | `Google-Apps`           | Google Workspace Business / Enterprise / Education   |
 | `Google-Vault`          | Google Vault                                         |
 | `Google-Drive-storage`  | Google additional storage                            |
-| `Cloud-Identity`        | Cloud Identity Free / Premium                        |
-| `Google-Voice`          | Google Voice Starter / Standard / Premier            |
 
-Add additional product IDs to `google_workspace.product_ids` in `settings.yaml`
-if your domain uses products not covered by this list. The full list is documented
-at https://developers.google.com/admin-sdk/licensing/v1/how-tos/products.
+Use `discover` to probe additional known product IDs (`101031` — Google Workspace
+Migrate — is also in the probed list) and write active ones to `settings.yaml`.
 
-**Note on add-ons** (e.g. AI Ultra Access, Gemini): newer Google Workspace add-ons
-may use product IDs not in the default list. If a subscription appears in the
-Google Admin Console but not in `test` output, add its product ID to
-`google_workspace.product_ids`. You can find product IDs via the Google Admin
-SDK API Explorer or by inspecting network traffic in the Admin Console.
+**Important**: not all subscriptions visible in the Google Admin Console are
+accessible via the Enterprise License Manager API. "Google Workspace add-on" type
+subscriptions (e.g. Google Voice Standard, AI Ultra Access) return
+`400 Invalid productId` from the API and cannot be synced — there is no workaround
+at the API level. Only products that return HTTP 200 from the Licensing API can be
+managed by this tool.
 
 <!-- TODO: implement a --create-users flag (and sync.create_users setting) that
 automatically creates a Snipe-IT user for any Google Workspace license holder
@@ -129,17 +132,6 @@ Implementation notes:
 - The Directory API client method (e.g. GetUser(ctx, email)) can reuse the
   existing JWT auth infrastructure — just add the second scope space-separated
   in the buildJWT scope claim and add the Directory API base URL constant. -->
-
-<!-- TODO: implement a `discover` command that connects to the configured Google
-Workspace, enumerates all product IDs that have at least one active license
-assignment (by iterating the known master product list from Google's docs, or
-via a future API endpoint if one becomes available), and writes the discovered
-product_ids list back into settings.yaml automatically. This solves the add-on
-discovery problem without requiring the user to research product IDs manually.
-Implementation note: the License Manager API has no "list all products for a
-customer" endpoint as of 2026-04; discovery must be done by querying each known
-product ID and collecting non-404 responses. The full known list is at
-https://developers.google.com/admin-sdk/licensing/v1/how-tos/products -->
 
 ---
 
@@ -203,11 +195,11 @@ Prefix and suffix are concatenated verbatim — include any separator characters
 
 **Examples:**
 
-| SKU Name                      | Prefix       | Suffix        | Snipe-IT License Name                              |
-|-------------------------------|--------------|---------------|----------------------------------------------------|
-| Google Workspace Business Plus | *(empty)*    | *(empty)*     | `Google Workspace Business Plus`                   |
-| Google Voice Standard          | `"Acme - "`  | *(empty)*     | `Acme - Google Voice Standard`                     |
-| Google Workspace Business Plus | *(empty)*    | `" (acme.com)"` | `Google Workspace Business Plus (acme.com)`     |
+| SKU Name                       | Prefix       | Suffix          | Snipe-IT License Name                          |
+|--------------------------------|--------------|-----------------|------------------------------------------------|
+| Google Workspace Business Plus | *(empty)*    | *(empty)*       | `Google Workspace Business Plus`               |
+| Google Vault                   | `"Acme - "`  | *(empty)*       | `Acme - Google Vault`                          |
+| Google Workspace Business Plus | *(empty)*    | `" (acme.com)"` | `Google Workspace Business Plus (acme.com)`    |
 
 ---
 
@@ -307,9 +299,12 @@ immediately regardless of current state.
    you must also add the licensing scope (`apps.licensing`) in the Admin Console
    DWD page. Both scopes can coexist on the same service account entry.
 
-5. **404 on product IDs.** If a product ID is not provisioned for the domain, the
-   API returns 404. The client treats this as "no assignments" rather than an error,
-   so listing unused products in `product_ids` is harmless.
+5. **404 and 400 on product IDs.** If a product ID is not provisioned for the
+   domain the API returns 404. If the product ID is not a valid Licensing API
+   product (common for "Google Workspace add-on" subscription types), the API
+   returns `400 Invalid productId`. The client treats both as "no assignments"
+   rather than a fatal error, so listing unknown product IDs in `product_ids` is
+   harmless — they are silently skipped.
 
 6. **Pagination is required.** The API returns at most 1000 assignments per page.
    `nextPageToken` is followed until empty.
@@ -326,9 +321,12 @@ immediately regardless of current state.
    the field name implies otherwise. Matching to Snipe-IT users is done by
    lowercased email.
 
-9. **Add-on product IDs.** Newer add-ons (AI Ultra Access, Gemini, etc.) may have
-   product IDs outside the default list. Use `test` to verify all expected SKUs
-   appear, and add missing product IDs to `google_workspace.product_ids`.
+9. **Add-on product IDs.** Many "Google Workspace add-on" subscriptions visible in
+   the Admin Console (e.g. Google Voice Standard, AI Ultra Access) are **not
+   accessible via the Enterprise License Manager API** — they return
+   `400 Invalid productId` regardless of the product ID tried. This is an API-level
+   limitation with no known workaround. Use `discover` to identify which product IDs
+   actually return data for your domain; only those can be synced.
 
 10. **API validation runs before every sync.** Both `test` and `sync` call
     `ValidateAPIs()` before doing any real work. It makes a minimal probe request
@@ -349,6 +347,7 @@ immediately regardless of current state.
 main.go
 cmd/
   root.go        # cobra root, viper init, logging
+  discover.go    # discover command: probe product IDs, write to settings.yaml
   sync.go        # sync command
   test.go        # test command
 internal/

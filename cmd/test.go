@@ -66,6 +66,12 @@ func runTest(cmd *cobra.Command, args []string) error {
 		EnrichNotesSKUs:   enrichSkus,
 	}
 
+	// Validate API access before doing any real work.
+	if err := gwsClient.ValidateAPIs(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "API access check failed: %v\n", err)
+		return err
+	}
+
 	// --- Google Workspace ---
 	fmt.Println("=== Google Workspace ===")
 	fmt.Printf("Domain:   %s\n", domain)
@@ -89,11 +95,6 @@ func runTest(cmd *cobra.Command, args []string) error {
 		if len(ouPaths) > 0 {
 			fmt.Printf("Users in OU scope: %d\n\n", len(userMap))
 		}
-	}
-
-	if err := gwsClient.ValidateAPIs(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "API access check failed: %v\n", err)
-		return err
 	}
 
 	skuGroups, err := gwsClient.ListLicenseAssignmentsBySku(ctx, productIDs)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackvaughanjr/googleworkspace2snipe/internal/googleworkspace"
 	"github.com/jackvaughanjr/googleworkspace2snipe/internal/snipeit"
@@ -36,6 +37,11 @@ type Config struct {
 	// either the SKU name (e.g. "Google Workspace Business Plus") or the SKU ID
 	// (e.g. "1010020025").
 	EnrichNotesSKUs []string
+	// CreateUsers controls whether new Snipe-IT users are created for Google
+	// Workspace users that have no matching Snipe-IT account. Created users have
+	// login disabled, no welcome email, and their start date set to the Google
+	// Workspace account creation date. Requires the Directory API scope.
+	CreateUsers bool
 }
 
 // Syncer orchestrates the Google Workspace → Snipe-IT per-SKU license sync.
@@ -76,7 +82,7 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 	// Fetch the Directory API user map when OU filtering or note enrichment is
 	// configured. The map is keyed by lowercased email and provides OrgUnitPath
 	// and IsAdmin for each active user in scope.
-	needsDirectory := len(s.config.OUPaths) > 0 || len(s.config.EnrichNotesSKUs) > 0
+	needsDirectory := len(s.config.OUPaths) > 0 || len(s.config.EnrichNotesSKUs) > 0 || s.config.CreateUsers
 	var userMap map[string]googleworkspace.User
 	if needsDirectory {
 		slog.Info("fetching Directory API user map",
@@ -121,6 +127,7 @@ func (s *Syncer) Run(ctx context.Context, emailFilter string) (Result, error) {
 		result.CheckedIn += skuResult.CheckedIn
 		result.Skipped += skuResult.Skipped
 		result.Warnings += skuResult.Warnings
+		result.UsersCreated += skuResult.UsersCreated
 		// Deduplicate unmatched emails across SKUs.
 		for _, email := range skuResult.UnmatchedEmails {
 			if _, seen := seenUnmatched[email]; !seen {
@@ -265,10 +272,26 @@ func (s *Syncer) syncSku(
 			continue
 		}
 		if snipeUser == nil {
-			slog.Warn("no Snipe-IT user found for Google Workspace user", "email", email)
-			result.UnmatchedEmails = append(result.UnmatchedEmails, email)
-			result.Warnings++
-			continue
+			if s.config.CreateUsers {
+				if s.config.DryRun {
+					slog.Info("[dry-run] would create Snipe-IT user", "email", email)
+					result.UsersCreated++
+					result.CheckedOut++ // would proceed to checkout
+					continue
+				}
+				snipeUser, err = s.createSnipeUser(ctx, email, userMap)
+				if err != nil {
+					slog.Warn("failed to create Snipe-IT user", "email", email, "error", err)
+					result.Warnings++
+					continue
+				}
+				result.UsersCreated++
+			} else {
+				slog.Warn("no Snipe-IT user found for Google Workspace user", "email", email)
+				result.UnmatchedEmails = append(result.UnmatchedEmails, email)
+				result.Warnings++
+				continue
+			}
 		}
 
 		if existing, ok := checkedOutByEmail[email]; ok {
@@ -341,6 +364,44 @@ func (s *Syncer) syncSku(
 	}
 
 	return result, nil
+}
+
+// createSnipeUser creates a new Snipe-IT user for a Google Workspace email.
+// User details (name, creation date) are pulled from userMap when available.
+// The created user has login disabled, no welcome email, and notes that
+// document the auto-creation source.
+func (s *Syncer) createSnipeUser(ctx context.Context, email string, userMap map[string]googleworkspace.User) (*snipeit.SnipeUser, error) {
+	firstName, lastName, startDate := "", "", ""
+
+	if u, ok := userMap[email]; ok {
+		firstName = u.Name.GivenName
+		lastName = u.Name.FamilyName
+		if u.CreationTime != "" {
+			if t, err := time.Parse(time.RFC3339, u.CreationTime); err == nil {
+				startDate = t.Format("2006-01-02")
+			} else if t, err := time.Parse("2006-01-02T15:04:05.000Z", u.CreationTime); err == nil {
+				startDate = t.Format("2006-01-02")
+			}
+		}
+	}
+
+	// Fall back to deriving a name from the email local-part when the Directory
+	// API entry is missing (e.g. user outside the OU filter scope).
+	if firstName == "" && lastName == "" {
+		local := strings.SplitN(email, "@", 2)[0]
+		parts := strings.SplitN(local, ".", 2)
+		firstName = parts[0]
+		if len(parts) == 2 {
+			lastName = parts[1]
+		}
+	}
+
+	notes := "Auto-created from Google Workspace via googleworkspace2snipe"
+	// Use the full email as username — it is globally unique within Snipe-IT.
+	username := email
+
+	slog.Info("creating Snipe-IT user", "email", email, "start_date", startDate)
+	return s.snipe.CreateUser(ctx, firstName, lastName, email, username, notes, startDate)
 }
 
 // BuildLicenseName applies the configured prefix and suffix to a SKU name.

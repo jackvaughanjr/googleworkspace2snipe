@@ -36,9 +36,13 @@ The base scope is always required:
 https://www.googleapis.com/auth/apps.licensing
 ```
 
-The Directory API scope is additionally required when either
-`google_workspace.ou_paths` or `google_workspace.enrich_notes_for_skus` is
-configured. If neither feature is used, this scope is **not included in the JWT
+The Directory API scope is additionally required when any of the following are
+configured or enabled:
+- `google_workspace.ou_paths`
+- `google_workspace.enrich_notes_for_skus`
+- `--create-users` / `sync.create_users: true`
+
+If none of these features are used, this scope is **not included in the JWT
 `scope` claim** and does not need to be granted in DWD.
 
 ```
@@ -58,7 +62,8 @@ change during a run.
    - Go to APIs & Services → Library in the Cloud Console.
    - Search for "Enterprise License Manager API" and enable it.
 
-3. **Enable the Admin SDK API** (only if using `ou_paths` or `enrich_notes_for_skus`):
+3. **Enable the Admin SDK API** (only if using `ou_paths`, `enrich_notes_for_skus`,
+   or `--create-users`):
    - In the same Library, search for "Admin SDK API" and enable it.
    - API enablements can take a few minutes to propagate.
 
@@ -76,8 +81,9 @@ change during a run.
      - **Client ID**: the service account's numeric client ID (the `client_id`
        field in the JSON key file, or shown as "Unique ID" in the Cloud Console).
      - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
-   - If you plan to use `ou_paths` or `enrich_notes_for_skus`, edit the same
-     DWD entry and add the Directory API scope as a second comma-separated value:
+   - If you plan to use `ou_paths`, `enrich_notes_for_skus`, or `--create-users`,
+     edit the same DWD entry and add the Directory API scope as a second
+     comma-separated value:
      `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
 
 6. **Choose an admin email** (`google_workspace.admin_email`): any super admin
@@ -117,22 +123,6 @@ subscriptions (e.g. Google Voice Standard, AI Ultra Access) return
 at the API level. Only products that return HTTP 200 from the Licensing API can be
 managed by this tool.
 
-<!-- TODO: implement a --create-users flag (and sync.create_users setting) that
-automatically creates a Snipe-IT user for any Google Workspace license holder
-not found in Snipe-IT, rather than warning and skipping them. Without the flag,
-current behaviour (warn + skip + Slack notification) is preserved.
-Implementation notes:
-- Requires the Directory API scope (admin.directory.user.readonly) in addition
-  to apps.licensing, so user display name and department can be populated on
-  the new Snipe-IT account.
-- Snipe-IT user creation uses POST /api/v1/users with at minimum: first_name,
-  last_name, username (email), email, password (random or forced-reset).
-- Add CreateUser to internal/snipeit/client.go; add the scope to the JWT
-  and update CONTEXT.md DWD setup instructions accordingly.
-- The Directory API client method (e.g. GetUser(ctx, email)) can reuse the
-  existing JWT auth infrastructure — just add the second scope space-separated
-  in the buildJWT scope claim and add the Directory API base URL constant. -->
-
 ---
 
 ## Config schema
@@ -160,6 +150,7 @@ snipe_it:
 sync:
   dry_run: false
   force: false
+  create_users: false
 
 slack:
   webhook_url: ""
@@ -251,6 +242,60 @@ both are configured, only one Directory API call is made).
 
 ---
 
+## Automatic user creation
+
+By default, if a Google Workspace license holder has no Snipe-IT account, the sync
+warns, skips them, and sends a Slack notification. With `--create-users` (or
+`sync.create_users: true` in `settings.yaml`), the sync creates the Snipe-IT account
+automatically and then proceeds to check out the seat.
+
+### Created user properties
+
+| Field          | Value                                                              |
+|----------------|--------------------------------------------------------------------|
+| `first_name`   | Given name from the Google Directory API                           |
+| `last_name`    | Family name from the Google Directory API                          |
+| `email`        | Google Workspace primary email                                     |
+| `username`     | Same as email (globally unique within Snipe-IT)                    |
+| `password`     | Cryptographically random 32-hex string (user cannot log in anyway) |
+| `activated`    | `false` — user cannot log into Snipe-IT                           |
+| `send_welcome` | `false` — no welcome email is sent                                 |
+| `start_date`   | Account creation date from Google Workspace (`YYYY-MM-DD`)         |
+| `notes`        | `"Auto-created from Google Workspace via googleworkspace2snipe"`   |
+| Groups         | None — avoids any auto-assign license groups                       |
+
+### Fallback name derivation
+
+When a user's Directory API entry is not available (e.g. the user is outside the
+OU filter scope but still holds a license), the first and last name are derived
+from the email local-part by splitting on `.`:
+
+- `jane.doe@example.com` → first: `jane`, last: `doe`
+- `jdoe@example.com` → first: `jdoe`, last: *(empty)*
+
+### Required DWD scope
+
+`--create-users` requires the Directory API scope — the same scope used by OU
+filtering and note enrichment. If neither of those features is configured, add
+the scope to the DWD entry specifically for user creation:
+
+```
+https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly
+```
+
+### Dry-run behaviour
+
+With `--dry-run --create-users`, creation is simulated: the sync logs
+`[dry-run] would create Snipe-IT user` and increments both `users_created` and
+`checked_out` counters without making any API calls.
+
+### Result counters
+
+`users_created` is reported in the console output line and the Slack completion
+message alongside the other counters.
+
+---
+
 ## Seat notes format
 
 **Standard notes** (all SKUs unless configured for enrichment):
@@ -337,7 +382,8 @@ immediately regardless of current state.
       Console. Error message points to Security → API controls → Domain-wide Delegation.
     - **200 or 404** → API is reachable (success; 404 just means no data for that probe).
     The Directory API is only probed when `withDirectory=true` was passed at
-    construction — i.e., when `ou_paths` or `enrich_notes_for_skus` is configured.
+    construction — i.e., when `ou_paths`, `enrich_notes_for_skus`, or
+    `sync.create_users` is configured.
 
 ---
 

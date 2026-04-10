@@ -3,6 +3,8 @@ package snipeit
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -289,6 +291,51 @@ func (c *Client) FindUserByEmail(ctx context.Context, email string) (*SnipeUser,
 		}
 	}
 	return nil, nil
+}
+
+// CreateUser creates a new Snipe-IT user. The user is created with login
+// disabled (activated=false), no welcome email, and no auto-assign license
+// group membership. startDate must be "YYYY-MM-DD" or empty to omit.
+func (c *Client) CreateUser(ctx context.Context, firstName, lastName, email, username, notes, startDate string) (*SnipeUser, error) {
+	pw, err := randomPassword()
+	if err != nil {
+		return nil, fmt.Errorf("snipeit CreateUser: generating password: %w", err)
+	}
+	body := map[string]any{
+		"first_name":            firstName,
+		"last_name":             lastName,
+		"email":                 email,
+		"username":              username,
+		"password":              pw,
+		"password_confirmation": pw,
+		"activated":             false,
+		"send_welcome":          false,
+		"notes":                 notes,
+	}
+	if startDate != "" {
+		body["start_date"] = startDate
+	}
+	var env envelope
+	if err := c.post(ctx, "/api/v1/users", body, &env); err != nil {
+		return nil, err
+	}
+	if env.Status != "success" {
+		return nil, fmt.Errorf("snipeit CreateUser: status=%q messages=%s", env.Status, string(env.Message))
+	}
+	var u SnipeUser
+	if err := json.Unmarshal(env.Payload, &u); err != nil {
+		return nil, fmt.Errorf("snipeit CreateUser: unmarshal payload: %w", err)
+	}
+	return &u, nil
+}
+
+// randomPassword generates a cryptographically random 32-hex-character password.
+func randomPassword() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 // --- HTTP helpers ---

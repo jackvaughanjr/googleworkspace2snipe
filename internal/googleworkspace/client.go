@@ -83,6 +83,9 @@ type User struct {
 	IsAdmin      bool     `json:"isAdmin"`
 	Suspended    bool     `json:"suspended"`
 	Archived     bool     `json:"archived"`
+	// CreationTime is the RFC3339 timestamp when the account was created in
+	// Google Workspace (e.g. "2024-01-15T10:30:00.000Z").
+	CreationTime string `json:"creationTime"`
 }
 
 // UserName holds the name components from the Directory API.

@@ -29,9 +29,11 @@ func init() {
 	syncCmd.Flags().Bool("dry-run", false, "simulate without making changes")
 	syncCmd.Flags().Bool("force", false, "re-sync even if notes appear up to date")
 	syncCmd.Flags().String("email", "", "sync a single user by email across all their SKUs")
+	syncCmd.Flags().Bool("create-users", false, "create Snipe-IT accounts for Google Workspace users that do not already exist")
 
 	_ = viper.BindPFlag("sync.dry_run", syncCmd.Flags().Lookup("dry-run"))
 	_ = viper.BindPFlag("sync.force", syncCmd.Flags().Lookup("force"))
+	_ = viper.BindPFlag("sync.create_users", syncCmd.Flags().Lookup("create-users"))
 }
 
 func runSync(cmd *cobra.Command, args []string) error {
@@ -56,7 +58,8 @@ func runSync(cmd *cobra.Command, args []string) error {
 
 	ouPaths := viper.GetStringSlice("google_workspace.ou_paths")
 	enrichSkus := viper.GetStringSlice("google_workspace.enrich_notes_for_skus")
-	needsDirectory := len(ouPaths) > 0 || len(enrichSkus) > 0
+	createUsers := viper.GetBool("sync.create_users")
+	needsDirectory := len(ouPaths) > 0 || len(enrichSkus) > 0 || createUsers
 
 	gwsClient, err := googleworkspace.NewClientFromFile(credFile, adminEmail, domain, needsDirectory)
 	if err != nil {
@@ -80,6 +83,7 @@ func runSync(cmd *cobra.Command, args []string) error {
 		LicenseNameSuffix: viper.GetString("google_workspace.license_name_suffix"),
 		OUPaths:           ouPaths,
 		EnrichNotesSKUs:   enrichSkus,
+		CreateUsers:       createUsers,
 	}
 
 	if cfg.DryRun {
@@ -122,15 +126,15 @@ func runSync(cmd *cobra.Command, args []string) error {
 		}
 
 		msg := fmt.Sprintf(
-			"googleworkspace2snipe sync complete — checked out: %d, notes updated: %d, checked in: %d, skipped: %d, warnings: %d",
-			result.CheckedOut, result.NotesUpdated, result.CheckedIn, result.Skipped, result.Warnings,
+			"googleworkspace2snipe sync complete — checked out: %d, notes updated: %d, checked in: %d, skipped: %d, users created: %d, warnings: %d",
+			result.CheckedOut, result.NotesUpdated, result.CheckedIn, result.Skipped, result.UsersCreated, result.Warnings,
 		)
 		if notifyErr := slackClient.Send(ctx, msg); notifyErr != nil {
 			slog.Warn("slack notification failed", "error", notifyErr)
 		}
 	}
 
-	fmt.Printf("Sync complete: checked_out=%d notes_updated=%d checked_in=%d skipped=%d warnings=%d\n",
-		result.CheckedOut, result.NotesUpdated, result.CheckedIn, result.Skipped, result.Warnings)
+	fmt.Printf("Sync complete: checked_out=%d notes_updated=%d checked_in=%d skipped=%d users_created=%d warnings=%d\n",
+		result.CheckedOut, result.NotesUpdated, result.CheckedIn, result.Skipped, result.UsersCreated, result.Warnings)
 	return nil
 }

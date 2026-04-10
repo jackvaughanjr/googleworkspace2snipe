@@ -99,6 +99,14 @@ sync:
   # Overridden by the --force flag.
   force: false
 
+  # Automatically create Snipe-IT accounts for Google Workspace users that do
+  # not already exist in Snipe-IT, rather than warning and skipping them.
+  # Created accounts have login disabled, no welcome email, no group membership,
+  # and their start date set to the Google Workspace account creation date.
+  # Requires the admin.directory.user.readonly DWD scope.
+  # Overridden by the --create-users flag.
+  create_users: false
+
 slack:
   # Incoming webhook URL for Slack notifications.
   # Optional. If omitted, all notifications are silently skipped.

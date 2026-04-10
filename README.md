@@ -32,9 +32,9 @@ interaction required. Runs fully headless; suitable for cron or similar schedule
 1. **Enable the Enterprise License Manager API** (APIs & Services → Library →
    "Enterprise License Manager API").
 
-2. **Enable the Admin SDK API** (only if you use OU filtering or enriched seat
-   notes): in the same Library, search for "Admin SDK API" and enable it. If you
-   do not use `ou_paths` or `enrich_notes_for_skus`, skip this step.
+2. **Enable the Admin SDK API** (only if you use OU filtering, enriched seat
+   notes, or `--create-users`): in the same Library, search for "Admin SDK API"
+   and enable it. If you do not use any of those features, skip this step.
 
 3. **Create a service account** (IAM & Admin → Service Accounts → Create). No Cloud
    IAM roles are required. After creating it, go to Keys → Add Key → Create New Key
@@ -47,13 +47,13 @@ interaction required. Runs fully headless; suitable for cron or similar schedule
      the JSON key)
    - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing`
 
-5. **Grant the Directory API scope** (only if you use OU filtering or enriched seat
-   notes): return to the same DWD entry created in step 4 and add a second scope,
-   separated from the first by a comma:
+5. **Grant the Directory API scope** (only if you use OU filtering, enriched seat
+   notes, or `--create-users`): return to the same DWD entry created in step 4 and
+   add a second scope, separated from the first by a comma:
    - **OAuth Scopes**: `https://www.googleapis.com/auth/apps.licensing,https://www.googleapis.com/auth/admin.directory.user.readonly`
 
-   If you do not use `ou_paths` or `enrich_notes_for_skus`, this scope is never
-   requested and does not need to be granted.
+   If you do not use `ou_paths`, `enrich_notes_for_skus`, or `--create-users`, this
+   scope is never requested and does not need to be granted.
 
 6. **Choose an admin email**: any Google Workspace super admin address in your domain.
    This is the account the service account will impersonate.
@@ -199,6 +199,35 @@ seat notes immediately — this applies to all licenses, not just enriched ones.
 Also requires `admin.directory.user.readonly` — if both OU filtering and note
 enrichment are configured, only one Directory API call is made per sync run.
 
+### Automatic user creation
+
+By default, Google Workspace license holders with no Snipe-IT account are skipped
+with a warning and a Slack notification. Add `--create-users` to create the Snipe-IT
+account automatically and proceed to check out the seat:
+
+```sh
+./googleworkspace2snipe sync --create-users
+```
+
+Or enable it permanently in `settings.yaml`:
+
+```yaml
+sync:
+  create_users: true
+```
+
+Created accounts are configured so they do not cause problems:
+
+- **Login disabled** (`activated: false`) — the user cannot sign into Snipe-IT
+- **No welcome email** (`send_welcome: false`)
+- **No group membership** — avoids any auto-assign license groups
+- **Start date** set to the account's Google Workspace creation date
+- **Notes** record the auto-creation source:
+  `Auto-created from Google Workspace via googleworkspace2snipe`
+
+Requires the `admin.directory.user.readonly` DWD scope — see step 5 of the Google
+Cloud setup section above.
+
 ### Product IDs
 
 By default, the following product families are queried:
@@ -302,6 +331,9 @@ Google Workspace Business Plus                         67  id=38 seats=70 free=3
 
 # Force re-sync of all seat notes (even if unchanged)
 ./googleworkspace2snipe sync --force
+
+# Create Snipe-IT accounts for users not yet in Snipe-IT, then check them out
+./googleworkspace2snipe sync --create-users
 ```
 
 ### Global flags
@@ -337,22 +369,12 @@ Set `slack.webhook_url` in `settings.yaml` (or `SLACK_WEBHOOK` env var) to
 receive notifications for:
 
 - Sync failures
-- Google Workspace users with no matching Snipe-IT account (deduplicated — one
-  message per user even if they hold multiple licenses)
+- Google Workspace users with no matching Snipe-IT account, deduplicated across
+  licenses (only when `--create-users` is not set; successful creations do not
+  trigger this notification)
 - Sync completion summaries
 
 All notifications are suppressed in `--dry-run` mode.
-
----
-
-## Roadmap
-
-- **`--create-users` flag** — Automatically create a Snipe-IT user account for
-  any Google Workspace license holder who does not already exist in Snipe-IT,
-  instead of warning and skipping them. The created user would be populated from
-  the license assignment data available at sync time (email, display name).
-  Without this flag the current behaviour (warn + skip + Slack notification) is
-  preserved.
 
 ---
 

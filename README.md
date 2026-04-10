@@ -150,12 +150,16 @@ google_workspace:
     - "/Sales"
 ```
 
-With an OU filter active, only users in those OUs are checked out or checked in.
-Seats belonging to users outside the filter are left untouched. Leave `ou_paths`
-empty (or omit it) to sync all active users in the domain.
+With an OU filter active:
+- **Checkout**: only users in the specified OUs are checked out to Snipe-IT licenses.
+- **Checkin**: only seats belonging to users within the OU scope are checked in when
+  those users lose a license. Seats for users outside the OU scope are left untouched,
+  even if those users are currently checked out in Snipe-IT.
 
-Requires the `admin.directory.user.readonly` DWD scope — see step 4 of the
-Google Cloud setup section above.
+Leave `ou_paths` empty (or omit it) to sync all active users in the domain.
+
+Requires the `admin.directory.user.readonly` DWD scope — see steps 2 and 5 of
+the Google Cloud setup section above.
 
 ### Enriched seat notes
 
@@ -186,7 +190,7 @@ is_admin: false
 
 `org_unit` and `is_admin` are updated automatically on subsequent syncs when a
 user moves OUs or gains/loses admin privileges. Use `--force` to rewrite all
-enriched notes immediately.
+seat notes immediately — this applies to all licenses, not just enriched ones.
 
 Also requires `admin.directory.user.readonly` — if both OU filtering and note
 enrichment are configured, only one Directory API call is made per sync run.

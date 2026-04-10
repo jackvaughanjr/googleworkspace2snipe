@@ -33,15 +33,17 @@ https://www.googleapis.com/auth/apps.licensing
 
 The Directory API scope is additionally required when either
 `google_workspace.ou_paths` or `google_workspace.enrich_notes_for_skus` is
-configured. If neither feature is used, this scope is not requested and does
-not need to be granted in DWD.
+configured. If neither feature is used, this scope is **not included in the JWT
+`scope` claim** and does not need to be granted in DWD.
 
 ```
 https://www.googleapis.com/auth/admin.directory.user.readonly
 ```
 
 Both scopes can coexist on the same DWD entry — enter them as a
-comma-separated list in the Admin Console.
+comma-separated list in the Admin Console. The scope is determined at client
+construction time (`NewClientFromFile(..., withDirectory bool)`) and cannot
+change during a run.
 
 ### Setup steps
 
@@ -327,6 +329,17 @@ immediately regardless of current state.
 9. **Add-on product IDs.** Newer add-ons (AI Ultra Access, Gemini, etc.) may have
    product IDs outside the default list. Use `test` to verify all expected SKUs
    appear, and add missing product IDs to `google_workspace.product_ids`.
+
+10. **API validation runs before every sync.** Both `test` and `sync` call
+    `ValidateAPIs()` before doing any real work. It makes a minimal probe request
+    to each configured API and maps the response to a specific error:
+    - **403 "has not been used" / "disabled"** → API not enabled in GCP project.
+      Error message names the API and links to where to enable it.
+    - **403 other** → API is enabled but the DWD scope is not granted in the Admin
+      Console. Error message points to Security → API controls → Domain-wide Delegation.
+    - **200 or 404** → API is reachable (success; 404 just means no data for that probe).
+    The Directory API is only probed when `withDirectory=true` was passed at
+    construction — i.e., when `ou_paths` or `enrich_notes_for_skus` is configured.
 
 ---
 

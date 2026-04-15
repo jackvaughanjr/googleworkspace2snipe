@@ -1,5 +1,7 @@
 # googleworkspace2snipe
 
+[![Latest Release](https://img.shields.io/github/v/release/jackvaughanjr/googleworkspace2snipe)](https://github.com/jackvaughanjr/googleworkspace2snipe/releases/latest) [![Go Version](https://img.shields.io/github/go-mod/go-version/jackvaughanjr/googleworkspace2snipe)](go.mod) [![License](https://img.shields.io/github/license/jackvaughanjr/googleworkspace2snipe)](LICENSE) [![Build](https://github.com/jackvaughanjr/googleworkspace2snipe/actions/workflows/release.yml/badge.svg)](https://github.com/jackvaughanjr/googleworkspace2snipe/actions/workflows/release.yml) [![Go Report Card](https://goreportcard.com/badge/github.com/jackvaughanjr/googleworkspace2snipe)](https://goreportcard.com/report/github.com/jackvaughanjr/googleworkspace2snipe) [![Downloads](https://img.shields.io/github/downloads/jackvaughanjr/googleworkspace2snipe/total)](https://github.com/jackvaughanjr/googleworkspace2snipe/releases)
+
 Syncs Google Workspace license assignments into [Snipe-IT](https://snipeit.com/).
 Each Google Workspace SKU (subscription) is created as a **separate Snipe-IT
 license** — for example, "Google Workspace Business Plus" and "Google Vault" each

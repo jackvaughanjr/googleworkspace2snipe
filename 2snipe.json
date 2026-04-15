@@ -1,0 +1,84 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jackvaughanjr/2snipe-manager/main/2snipe.schema.json",
+  "name": "googleworkspace2snipe",
+  "display_name": "Google Workspace",
+  "description": "Sync Google Workspace license assignments to Snipe-IT license seats",
+  "version": "1.7.0",
+  "min_snipemgr": "0.1.0",
+  "tags": ["saas", "identity", "productivity", "google"],
+  "category": "Identity & Access Management",
+  "config_schema": [
+    {
+      "key": "google_workspace.credentials_file",
+      "label": "Service Account Credentials File",
+      "secret": false,
+      "required": true,
+      "hint": "Path to the service account JSON key file with domain-wide delegation granted"
+    },
+    {
+      "key": "google_workspace.admin_email",
+      "label": "Google Workspace Admin Email",
+      "secret": false,
+      "required": true,
+      "hint": "Email of a super admin to impersonate — must be a super admin, not a delegated admin"
+    },
+    {
+      "key": "google_workspace.domain",
+      "label": "Google Workspace Domain",
+      "secret": false,
+      "required": true,
+      "hint": "Your primary domain, e.g. example.com"
+    },
+    {
+      "key": "snipe_it.url",
+      "label": "Snipe-IT URL",
+      "secret": false,
+      "required": true,
+      "hint": "e.g. https://snipe.example.com"
+    },
+    {
+      "key": "snipe_it.api_key",
+      "label": "Snipe-IT API Key",
+      "secret": true,
+      "required": true,
+      "hint": "Admin → API Keys in your Snipe-IT instance"
+    },
+    {
+      "key": "snipe_it.license_category_id",
+      "label": "Snipe-IT License Category ID",
+      "secret": false,
+      "required": true,
+      "hint": "Find at Admin → Categories (integer ID). All Google Workspace licenses share this category"
+    },
+    {
+      "key": "google_workspace.license_name_prefix",
+      "label": "License Name Prefix",
+      "secret": false,
+      "required": false,
+      "hint": "Optional prefix prepended to each SKU name, e.g. \"Acme - \""
+    },
+    {
+      "key": "google_workspace.license_name_suffix",
+      "label": "License Name Suffix",
+      "secret": false,
+      "required": false,
+      "hint": "Optional suffix appended to each SKU name, e.g. \" (acme.com)\""
+    },
+    {
+      "key": "slack.webhook_url",
+      "label": "Slack Webhook URL",
+      "secret": true,
+      "required": false,
+      "hint": "Optional. Incoming webhook for sync notifications"
+    }
+  ],
+  "shared_config": ["snipe_it"],
+  "commands": {
+    "sync": true,
+    "test": true
+  },
+  "releases": {
+    "github_releases": true,
+    "asset_pattern": "googleworkspace2snipe-{os}-{arch}"
+  }
+}

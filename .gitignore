@@ -10,6 +10,7 @@ go.work.sum
 .env
 settings.yaml
 *.json
+!2snipe.json
 .cache/
 googleworkspace2snipe
 .DS_Store

@@ -399,6 +399,7 @@ All notifications are suppressed in `--dry-run` mode or when `--no-slack` is pas
 
 | Version | Key changes |
 |---------|-------------|
+| v1.6.1 | Fixed seat assignment tracking — seats were re-checked-out on every run due to incorrect JSON field tag |
 | v1.6.0 | Added `--no-slack` flag to suppress Slack notifications for a single run |
 | v1.5.0 | Added `--create-users` flag to automatically provision missing Snipe-IT accounts |
 | v1.4.0 | Added `discover` command to auto-detect Google Workspace product IDs; fixed 400 for add-on products |

@@ -52,7 +52,7 @@ type AssignedTo struct {
 type LicenseSeat struct {
 	ID         int         `json:"id"`
 	LicenseID  int         `json:"license_id"`
-	AssignedTo *AssignedTo `json:"assigned_to"`
+	AssignedTo *AssignedTo `json:"assigned_user"` // GET response uses "assigned_user", not "assigned_to"
 	Notes      string      `json:"notes"`
 }
 

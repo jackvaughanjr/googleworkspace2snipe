@@ -336,7 +336,20 @@ Google Workspace Business Plus                         67  id=38 seats=70 free=3
 
 # Create Snipe-IT accounts for users not yet in Snipe-IT, then check them out
 ./googleworkspace2snipe sync --create-users
+
+# Suppress Slack notifications for this run
+./googleworkspace2snipe sync --no-slack
 ```
+
+### Sync flags
+
+| Flag              | Description                                                       |
+|-------------------|-------------------------------------------------------------------|
+| `--dry-run`       | Simulate without making changes                                   |
+| `--force`         | Re-sync even if notes appear up to date                           |
+| `--email EMAIL`   | Sync a single user by email across all their SKUs                 |
+| `--create-users`  | Create Snipe-IT accounts for users not already in Snipe-IT        |
+| `--no-slack`      | Suppress Slack notifications for this run (not saved to config)   |
 
 ### Global flags
 
@@ -376,7 +389,7 @@ receive notifications for:
   trigger this notification)
 - Sync completion summaries
 
-All notifications are suppressed in `--dry-run` mode.
+All notifications are suppressed in `--dry-run` mode or when `--no-slack` is passed.
 
 ---
 
@@ -386,20 +399,21 @@ All notifications are suppressed in `--dry-run` mode.
 
 | Version | Key changes |
 |---------|-------------|
-| v1.0.0 | Initial scaffold — Google Workspace → Snipe-IT license seat sync |
-| v1.1.0 | Redesign — sync each Google Workspace SKU as a separate Snipe-IT license (was one combined license) |
-| v1.1.1 | Docs: added TODO for discover command |
-| v1.1.2 | Docs: added TODO for `--create-users` flag |
-| v1.2.0 | Added OU filtering and per-license note enrichment |
-| v1.2.1 | Simplified array config fields; improved JSON credentials documentation |
-| v1.2.2 | Surfaced Directory API scope setup steps in docs |
-| v1.2.3 | Added Admin SDK API enablement step for Directory API features |
-| v1.3.0 | Validate Google API access before sync with actionable error messages |
-| v1.3.1 | Fixed erroneous usage block and duplicate error echo for runtime errors |
-| v1.3.2 | Fixed `ValidateAPIs` running before `GetUserMap` in test command |
-| v1.3.3 | Filled gaps in README and CONTEXT.md identified by audit |
-| v1.4.0 | Added `discover` command to auto-detect Google Workspace product IDs; fixed 400 for add-on products |
+| v1.6.0 | Added `--no-slack` flag to suppress Slack notifications for a single run |
 | v1.5.0 | Added `--create-users` flag to automatically provision missing Snipe-IT accounts |
+| v1.4.0 | Added `discover` command to auto-detect Google Workspace product IDs; fixed 400 for add-on products |
+| v1.3.3 | Filled gaps in README and CONTEXT.md identified by audit |
+| v1.3.2 | Fixed `ValidateAPIs` running before `GetUserMap` in test command |
+| v1.3.1 | Fixed erroneous usage block and duplicate error echo for runtime errors |
+| v1.3.0 | Validate Google API access before sync with actionable error messages |
+| v1.2.3 | Added Admin SDK API enablement step for Directory API features |
+| v1.2.2 | Surfaced Directory API scope setup steps in docs |
+| v1.2.1 | Simplified array config fields; improved JSON credentials documentation |
+| v1.2.0 | Added OU filtering and per-license note enrichment |
+| v1.1.2 | Docs: added TODO for `--create-users` flag |
+| v1.1.1 | Docs: added TODO for discover command |
+| v1.1.0 | Redesign — sync each Google Workspace SKU as a separate Snipe-IT license (was one combined license) |
+| v1.0.0 | Initial scaffold — Google Workspace → Snipe-IT license seat sync |
 
 Releases are built automatically by GitHub Actions on `v*` tag push:
 

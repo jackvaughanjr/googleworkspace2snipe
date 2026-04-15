@@ -50,9 +50,14 @@ func runTest(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fatal("creating Google Workspace client: %v", err)
 	}
+	rateLimitMs := viper.GetInt("sync.rate_limit_ms")
+	if rateLimitMs <= 0 {
+		rateLimitMs = 500
+	}
 	snipeClient := snipeit.NewClient(
 		viper.GetString("snipe_it.url"),
 		viper.GetString("snipe_it.api_key"),
+		rateLimitMs,
 	)
 
 	productIDs := viper.GetStringSlice("google_workspace.product_ids")

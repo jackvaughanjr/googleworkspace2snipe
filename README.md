@@ -10,6 +10,8 @@ become their own license entry with per-user seat assignments.
 Users are automatically checked out to the licenses they hold in Google Workspace
 and checked back in when a license is removed or a user is suspended.
 
+> Part of the [\*2snipe](https://github.com/jackvaughanjr?tab=repositories&q=2snipe) integration family, inspired by [CampusTech](https://github.com/CampusTech)'s Snipe-IT integrations.
+
 > **Note:** only licenses exposed by the [Google Enterprise License Manager API](https://developers.google.com/admin-sdk/licensing/overview)
 > can be synced. Certain "Google Workspace add-on" subscription types (e.g. Google
 > Voice Standard, AI Ultra Access) are not accessible through this API and cannot
@@ -399,6 +401,7 @@ All notifications are suppressed in `--dry-run` mode or when `--no-slack` is pas
 
 | Version | Key changes |
 |---------|-------------|
+| v1.7.0 | Make Snipe-IT API rate limit configurable via `sync.rate_limit_ms` and `SNIPE_RATE_LIMIT_MS` env var |
 | v1.6.1 | Fixed seat assignment tracking — seats were re-checked-out on every run due to incorrect JSON field tag |
 | v1.6.0 | Added `--no-slack` flag to suppress Slack notifications for a single run |
 | v1.5.0 | Added `--create-users` flag to automatically provision missing Snipe-IT accounts |

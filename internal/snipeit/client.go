@@ -23,14 +23,14 @@ type Client struct {
 	limiter    *rate.Limiter
 }
 
-func NewClient(baseURL, apiKey string) *Client {
+func NewClient(baseURL, apiKey string, rateLimitMs int) *Client {
 	return &Client{
 		baseURL: strings.TrimRight(baseURL, "/"),
 		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		limiter: rate.NewLimiter(rate.Every(500*time.Millisecond), 1),
+		limiter: rate.NewLimiter(rate.Every(time.Duration(rateLimitMs)*time.Millisecond), 1),
 	}
 }
 

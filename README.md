@@ -412,10 +412,20 @@ docker push YOUR_REGION-docker.pkg.dev/YOUR_PROJECT/snipe-integrations/googlewor
 
 **Option B — Cloud Build** (no Docker required):
 ```bash
+# One-time project setup:
+gcloud services enable cloudbuild.googleapis.com --project=YOUR_PROJECT
+PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT --format='value(projectNumber)')
+gcloud projects add-iam-policy-binding YOUR_PROJECT \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/cloudbuild.builds.builder"
+
+# Build and push:
 gcloud builds submit \
   --tag YOUR_REGION-docker.pkg.dev/YOUR_PROJECT/snipe-integrations/googleworkspace2snipe:latest \
   --project=YOUR_PROJECT .
 ```
+
+> The IAM grant is required once per project. Without it Cloud Build fails with a 403 reading the source upload from Cloud Storage.
 
 See the [snipemgr README](https://github.com/jackvaughanjr/2snipe-manager#building-container-images-for-cloud-run-jobs) for full GCP setup instructions (Artifact Registry repo creation, IAM, Cloud Scheduler).
 

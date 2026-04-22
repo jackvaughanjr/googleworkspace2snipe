@@ -397,43 +397,15 @@ All notifications are suppressed in `--dry-run` mode or when `--no-slack` is pas
 
 ## Releases
 
-## Running with snipemgr (automated scheduling)
+## Building a container image
 
-`googleworkspace2snipe` can be scheduled via [snipemgr](https://github.com/jackvaughanjr/2snipe-manager), which manages installation, secret storage (GCP Secret Manager), and Cloud Run Job scheduling across all `*2snipe` integrations. A `Dockerfile` is included in this repo.
+A `Dockerfile` is included for containerized deployments. To build locally:
 
-Build and push the container image to Artifact Registry — choose one method:
-
-**Option A — Docker** (requires Docker installed and running):
 ```bash
-gcloud auth configure-docker YOUR_REGION-docker.pkg.dev
-docker build -t YOUR_REGION-docker.pkg.dev/YOUR_PROJECT/snipe-integrations/googleworkspace2snipe:latest .
-docker push YOUR_REGION-docker.pkg.dev/YOUR_PROJECT/snipe-integrations/googleworkspace2snipe:latest
+docker build -t googleworkspace2snipe:latest .
 ```
 
-**Option B — Cloud Build** (no Docker required):
-```bash
-# One-time project setup:
-gcloud services enable cloudbuild.googleapis.com --project=YOUR_PROJECT
-PROJECT_NUMBER=$(gcloud projects describe YOUR_PROJECT --format='value(projectNumber)')
-gcloud projects add-iam-policy-binding YOUR_PROJECT \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/cloudbuild.builds.builder"
-gcloud projects add-iam-policy-binding YOUR_PROJECT \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/artifactregistry.writer"
-gcloud projects add-iam-policy-binding YOUR_PROJECT \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/logging.logWriter"
-
-# Build and push:
-gcloud builds submit \
-  --tag YOUR_REGION-docker.pkg.dev/YOUR_PROJECT/snipe-integrations/googleworkspace2snipe:latest \
-  --project=YOUR_PROJECT .
-```
-
-> These three IAM grants are required once per project. `cloudbuild.builds.builder` allows Cloud Build to read its source upload from Cloud Storage; `artifactregistry.writer` allows it to push the built image; `logging.logWriter` allows build logs to appear in Cloud Logging.
-
-See the [snipemgr README](https://github.com/jackvaughanjr/2snipe-manager#building-container-images-for-cloud-run-jobs) for full GCP setup instructions (Artifact Registry repo creation, IAM, Cloud Scheduler).
+For automated scheduling via Cloud Run Jobs, use [snipemgr](https://github.com/jackvaughanjr/2snipe-manager) — it handles image publishing, secret storage, and scheduling. See the [snipemgr README](https://github.com/jackvaughanjr/2snipe-manager#building-container-images-for-cloud-run-jobs) for complete GCP setup instructions.
 
 ---
 
